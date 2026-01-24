@@ -34,15 +34,21 @@ export async function loadConfig(pathConfig: PathConfig): Promise<SyncConfig | n
   const envToken = process.env[ENV_TOKEN_KEY];
 
   if (config) {
-    // Config exists - use env var as fallback if no token in config
-    if (!config.token && envToken) {
-      config.token = envToken;
+    // Config exists - merge with defaults and use env var as fallback if no token
+    const mergedConfig = {
+      ...DEFAULT_CONFIG,
+      ...config,
+      sync: { ...DEFAULT_CONFIG.sync, ...config.sync },
+    };
+
+    if (!mergedConfig.token && envToken) {
+      mergedConfig.token = envToken;
     }
     // Generate machineId if missing
-    if (!config.machineId) {
-      config.machineId = generateMachineId();
+    if (!mergedConfig.machineId) {
+      mergedConfig.machineId = generateMachineId();
     }
-    return config;
+    return mergedConfig;
   }
 
   // No config file - create minimal config from env var if available

@@ -29,7 +29,7 @@ export interface OperationContext {
 }
 
 export interface PushContext extends OperationContext {
-  files: Record<string, { content: string }>;
+  files: Record<string, { content: string | null }>; // null = delete file
   manifest: Manifest;
   now: string;
   machineId: string;

@@ -8,8 +8,9 @@ Sync your OpenCode configuration, sessions, and data across multiple machines us
 - **Multi-Machine Support** - Safely sync across laptops, VMs, and servers simultaneously
 - **Conflict Resolution** - Vector clocks detect conflicts, three-way merge resolves them
 - **Encrypted Credentials** - AES-256-GCM encryption for sensitive data
-- **Auto-Sync** - Syncs on startup and continuously watches for changes
+- **Auto-Sync** - Syncs on startup, on file changes (2s debounce), and every minute
 - **Offline-Friendly** - Works offline, syncs when reconnected
+- **Atomic Updates** - Uses Git's compare-and-swap for safe concurrent access
 
 ## Installation
 
@@ -19,7 +20,7 @@ Add to your `opencode.json` config file:
 
 ```json
 {
-  "plugin": ["opencode-sync"]
+  "plugin": ["oc-sync"]
 }
 ```
 
@@ -45,15 +46,17 @@ npm install && npm run build
 
 ## What Gets Synced
 
-| Category | Data |
-|----------|------|
-| Config | `opencode.json`, agents, commands, modes, tools, themes |
-| State | Model selections, prompt history, stashed prompts |
-| Credentials | OAuth tokens, MCP auth (encrypted) |
-| Sessions | Session metadata and history |
-| Messages | Conversation messages and parts |
-| Projects | Project configurations |
-| Todos | Task lists and session diffs |
+| Category | Data | Default |
+|----------|------|---------|
+| Config | `opencode.json`, agents, commands, modes, tools, themes | ✅ Enabled |
+| State | Model selections, prompt history, stashed prompts | ✅ Enabled |
+| Credentials | OAuth tokens, MCP auth (encrypted) | ✅ Enabled |
+| Sessions | Session metadata and history | ✅ Enabled |
+| Messages | Conversation messages and parts | ❌ Disabled* |
+| Projects | Project configurations | ✅ Enabled |
+| Todos | Task lists and session diffs | ✅ Enabled |
+
+*Messages sync is disabled by default because it can be very large (8MB+). Enable it in config if needed.
 
 ## How It Works
 
@@ -157,7 +160,7 @@ On subsequent runs:
     "state": true,
     "credentials": true,
     "sessions": true,
-    "messages": true,
+    "messages": false,
     "projects": true,
     "todos": true
   },
@@ -165,12 +168,27 @@ On subsequent runs:
 }
 ```
 
+**Note:** `messages` is `false` by default because conversation history can be very large (8MB+). Set to `true` if you want to sync messages across machines.
+
+## Sync Timing
+
+The plugin syncs at these times:
+
+| Trigger | When |
+|---------|------|
+| **Startup** | Immediately when OpenCode starts |
+| **File Changes** | 2 seconds after local OpenCode files change |
+| **Interval** | Every 1 minute (configurable) |
+
+This is **not realtime** - there's typically a 1-60 second delay depending on when changes occur.
+
 ## Security
 
 - Credentials are encrypted with AES-256-GCM before upload
 - Encryption key is derived from your passphrase using PBKDF2
 - The repository is created as **private** (not public)
 - Token is stored locally, never uploaded
+- Atomic commits with compare-and-swap prevent race conditions
 
 ## Architecture
 

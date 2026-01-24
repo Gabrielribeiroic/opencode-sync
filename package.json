@@ -1,7 +1,7 @@
 {
-  "name": "opencode-sync",
+  "name": "oc-sync",
   "version": "0.1.0",
-  "description": "Sync OpenCode data across machines using GitHub Gists with vector clock conflict resolution",
+  "description": "Sync OpenCode data across machines using a private GitHub repository with vector clock conflict resolution",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
   "type": "module",
@@ -12,8 +12,8 @@
     "build": "tsc",
     "dev": "tsc --watch",
     "clean": "rm -rf dist",
-    "lint": "eslint src/**/*.ts",
-    "lint:fix": "eslint src/**/*.ts --fix",
+    "lint": "eslint \"src/**/*.ts\"",
+    "lint:fix": "eslint \"src/**/*.ts\" --fix",
     "format": "prettier --write \"src/**/*.ts\"",
     "format:check": "prettier --check \"src/**/*.ts\"",
     "typecheck": "tsc --noEmit",
@@ -30,13 +30,13 @@
   "keywords": [
     "opencode",
     "sync",
-    "gist",
     "github",
     "backup",
     "plugin",
-    "vector-clock"
+    "vector-clock",
+    "multi-machine"
   ],
-  "author": "",
+  "author": "Ercin Dedeoglu",
   "license": "MIT",
   "dependencies": {
     "@opencode-ai/plugin": "latest",

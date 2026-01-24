@@ -56,12 +56,17 @@ interface ContentFile {
  */
 export class RepoStorageBackend implements StorageBackend {
   private readonly token: string;
+  private readonly owner: string;
+  private readonly repo: string;
   private readonly baseUrl: string;
   private readonly maxRetries: number;
   private readonly retryDelayMs: number;
+  private detectedBranch: 'main' | 'master' | null = null;
 
   constructor(config: RepoClientConfig) {
     this.token = config.token;
+    this.owner = config.owner;
+    this.repo = config.repo;
     this.baseUrl = `https://api.github.com/repos/${config.owner}/${config.repo}`;
     this.maxRetries = config.maxRetries ?? DEFAULT_MAX_RETRIES;
     this.retryDelayMs = config.retryDelayMs ?? DEFAULT_RETRY_DELAY_MS;
@@ -86,8 +91,25 @@ export class RepoStorageBackend implements StorageBackend {
     if (!res.ok) return null;
 
     const data = (await res.json()) as ContentFile;
-    if (!data.content) return null;
 
+    // For files >1MB, GitHub returns empty content and provides download_url
+    if (!data.content && data.size > 1000000) {
+      const branch = await this.getDefaultBranch();
+      const downloadUrl = `https://raw.githubusercontent.com/${this.owner}/${this.repo}/${branch}/${fullPath}`;
+      const downloadRes = await fetchWithRetry(
+        downloadUrl,
+        {
+          headers: { Authorization: `Bearer ${this.token}` },
+        },
+        this.maxRetries,
+        this.retryDelayMs
+      );
+
+      if (!downloadRes.ok) return null;
+      return await downloadRes.text();
+    }
+
+    if (!data.content) return null;
     return Buffer.from(data.content, 'base64').toString('utf-8');
   }
 
@@ -165,16 +187,30 @@ export class RepoStorageBackend implements StorageBackend {
     }
   }
 
-  private async getHeadSha(): Promise<string> {
+  private async getDefaultBranch(): Promise<'main' | 'master'> {
+    if (this.detectedBranch) return this.detectedBranch;
+
     const res = await this.fetch('/git/ref/heads/main');
+    if (res.ok) {
+      this.detectedBranch = 'main';
+      return 'main';
+    }
+
+    const masterRes = await this.fetch('/git/ref/heads/master');
+    if (masterRes.ok) {
+      this.detectedBranch = 'master';
+      return 'master';
+    }
+
+    // Default to main if neither exists (new repo)
+    return 'main';
+  }
+
+  private async getHeadSha(): Promise<string> {
+    const branch = await this.getDefaultBranch();
+    const res = await this.fetch(`/git/ref/heads/${branch}`);
     if (!res.ok) {
-      // Try master branch
-      const masterRes = await this.fetch('/git/ref/heads/master');
-      if (!masterRes.ok) {
-        throw new RepoApiError('Cannot find main or master branch', 404);
-      }
-      const data = (await masterRes.json()) as GitRef;
-      return data.object.sha;
+      throw new RepoApiError(`Cannot find ${branch} branch`, 404);
     }
     const data = (await res.json()) as GitRef;
     return data.object.sha;
@@ -276,13 +312,11 @@ export class RepoStorageBackend implements StorageBackend {
   }
 
   private async updateRef(commitSha: string): Promise<void> {
-    const body = JSON.stringify({ sha: commitSha });
+    // force: false ensures proper CAS - GitHub will reject if HEAD moved
+    const body = JSON.stringify({ sha: commitSha, force: false });
+    const branch = await this.getDefaultBranch();
 
-    // Try main first, then master
-    let res = await this.fetch('/git/refs/heads/main', { method: 'PATCH', body });
-    if (!res.ok && res.status === 422) {
-      res = await this.fetch('/git/refs/heads/master', { method: 'PATCH', body });
-    }
+    const res = await this.fetch(`/git/refs/heads/${branch}`, { method: 'PATCH', body });
 
     if (!res.ok) {
       if (res.status === 422) {

@@ -12,23 +12,26 @@ import type { CategoryData, PushContext, Manifest, LocalSyncState, SyncCategory 
 
 /**
  * Prepare all data for pushing to remote.
+ * @param existingFiles - List of existing filenames in storage (for cleanup of orphaned chunks)
  */
 export function preparePushData(
   localData: CategoryData[],
   config: { machineId: string; sync: Record<SyncCategory, boolean> },
   localState: LocalSyncState | null,
-  passphrase: string | undefined
+  passphrase: string | undefined,
+  existingFiles?: string[]
 ): {
-  files: Record<string, { content: string }>;
+  files: Record<string, { content: string | null }>;
   manifest: Manifest;
   changedCategories: SyncCategory[];
 } {
-  const files: Record<string, { content: string }> = {};
+  const files: Record<string, { content: string | null }> = {};
   const now = new Date().toISOString();
   const machineId = config.machineId;
   const newClock = incrementClock(localState?.vectorClock ?? {}, machineId);
   const manifest = createManifest(now, newClock, localState, machineId);
   const changedCategories: SyncCategory[] = [];
+  const newChunkFiles = new Set<string>();
   const ctx: PushContext = {
     files,
     manifest,
@@ -42,8 +45,19 @@ export function preparePushData(
 
   for (const { category, data } of localData) {
     if (!config.sync[category]) continue;
-    packCategoryData(category, data, ctx);
+    const chunkFilenames = packCategoryData(category, data, ctx);
+    for (const f of chunkFilenames) newChunkFiles.add(f);
     changedCategories.push(category);
+  }
+
+  // Mark orphaned chunk files for deletion (e.g., when data shrinks)
+  if (existingFiles) {
+    for (const filename of existingFiles) {
+      // Only delete chunk files (category-NNN.json.gz.b64), not manifest
+      if (filename !== 'manifest.json' && !newChunkFiles.has(filename)) {
+        files[filename] = { content: null };
+      }
+    }
   }
 
   addSyncHistory(ctx, changedCategories);
@@ -73,8 +87,9 @@ function createManifest(
 
 /**
  * Pack and add category data to files and manifest.
+ * Returns list of chunk filenames created.
  */
-function packCategoryData(category: SyncCategory, data: string, ctx: PushContext): void {
+function packCategoryData(category: SyncCategory, data: string, ctx: PushContext): string[] {
   const dataToStore = maybeEncrypt(category, data, ctx.passphrase);
   const packed = packCategory(category, dataToStore);
 
@@ -91,6 +106,8 @@ function packCategoryData(category: SyncCategory, data: string, ctx: PushContext
     lastModifiedBy: ctx.machineId,
     vectorClock: { [ctx.machineId]: ctx.newClock[ctx.machineId] ?? 1 },
   };
+
+  return packed.chunks.map((c) => c.filename);
 }
 
 /**

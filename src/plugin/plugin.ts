@@ -4,12 +4,19 @@
  * Main plugin definition with hooks and event handlers.
  */
 
+/* eslint-disable max-lines */
 import { homedir } from 'node:os';
 import { getPathConfig, type PathConfig } from '../types/paths.js';
-import { createEmptyManifest } from '../types/index.js';
-import { initializeState, getPluginState, updateConfig } from './state-manager.js';
-import { getTokenSource } from '../data/index.js';
+import { createEmptyManifest, type SyncCategory } from '../types/index.js';
+import {
+  initializeState,
+  getPluginState,
+  updateConfig,
+  initializeEngine,
+} from './state-manager.js';
+import { getTokenSource, loadLocalData } from '../data/index.js';
 import { RepoStorageBackend } from '../storage/index.js';
+import { FileWatcher } from '../sync/watcher/index.js';
 import type { PluginState } from './types.js';
 
 /** Default repo name for sync storage */
@@ -18,9 +25,29 @@ const DEFAULT_REPO_NAME = '.opencode-sync';
 /** Log prefix for consistent output */
 const LOG_PREFIX = '[opencode-sync]';
 
-/** Log helper */
+/** Active file watcher instance */
+let activeWatcher: FileWatcher | null = null;
+
+/** Active interval timer for periodic sync */
+let syncInterval: NodeJS.Timeout | null = null;
+
+/** Log helper - writes to file only, no console output */
 function log(message: string): void {
-  console.error(`${LOG_PREFIX} ${message}`);
+  const timestamp = new Date().toISOString();
+  const logMessage = `${timestamp} ${LOG_PREFIX} ${message}`;
+
+  try {
+    /* eslint-disable @typescript-eslint/no-require-imports */
+    const fs = require('node:fs') as { appendFileSync: (path: string, data: string) => void };
+    const path = require('node:path') as { join: (...parts: string[]) => string };
+    /* eslint-enable @typescript-eslint/no-require-imports */
+    const logDir = path.join(homedir(), '.local/share/opencode/log');
+    const logFile = path.join(logDir, 'opencode-sync.log');
+    fs.appendFileSync(logFile, logMessage + '\n');
+  } catch {
+    // Fallback to console if file write fails
+    console.error(logMessage);
+  }
 }
 
 /** Log setup instructions when configuration is missing */
@@ -138,6 +165,7 @@ async function ensureStorageExists(pathConfig: PathConfig): Promise<void> {
 
   if (config.repoOwner && config.repoName) {
     log(`Linked to repo: ${config.repoOwner}/${config.repoName}`);
+    initializeEngine();
     return;
   }
 
@@ -152,6 +180,7 @@ async function ensureStorageExists(pathConfig: PathConfig): Promise<void> {
     log(`Linked to repo: ${owner}/${repoName}`);
     await updateConfig(pathConfig, { repoOwner: owner, repoName });
     log('Repo saved to config');
+    initializeEngine();
   } catch (error) {
     const errMsg = error instanceof Error ? error.message : String(error);
     log(`ERROR: Failed to setup storage: ${errMsg}`);
@@ -159,8 +188,125 @@ async function ensureStorageExists(pathConfig: PathConfig): Promise<void> {
   }
 }
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-export const OpencodeSyncPlugin = async (_ctx: any): Promise<Record<string, unknown>> => {
+/** Perform initial sync on plugin startup (non-blocking) */
+function performInitialSync(pathConfig: PathConfig): void {
+  const state = getPluginState();
+
+  if (!state.isInitialized || !state.engine) {
+    log('Skipping initial sync - engine not initialized');
+    return;
+  }
+
+  if (!state.config?.autoSyncOnStartup) {
+    log('Auto-sync on startup disabled');
+    return;
+  }
+
+  // Run sync in background - don't block plugin startup
+  const config = state.config;
+  const engine = state.engine;
+  void (async () => {
+    try {
+      log('Running initial sync in background...');
+      const { categories } = await loadLocalData(pathConfig, config.sync);
+      const result = await engine.sync(categories);
+
+      if (result.success && result.action !== 'error') {
+        log(`Initial sync complete: ${result.message}`);
+      } else {
+        log(`Sync completed: ${result.message}`);
+      }
+    } catch (error) {
+      const errMsg = error instanceof Error ? error.message : String(error);
+      log(`WARNING: Initial sync failed: ${errMsg}`);
+    }
+  })();
+}
+
+/** Start file watcher for continuous sync */
+function startFileWatcher(pathConfig: PathConfig): void {
+  const state = getPluginState();
+
+  if (!state.config?.continuousSync || !state.engine) {
+    return;
+  }
+
+  try {
+    const enabledCategories = new Set<SyncCategory>(
+      Object.entries(state.config.sync)
+        .filter(([, enabled]) => enabled)
+        .map(([cat]) => cat as SyncCategory)
+    );
+
+    const config = state.config;
+    const engine = state.engine;
+
+    activeWatcher = new FileWatcher({
+      pathConfig,
+      debounceMs: state.config.fileWatcherDebounceMs,
+      enabledCategories,
+      onEvent: async () => {
+        try {
+          const { categories } = await loadLocalData(pathConfig, config.sync);
+          await engine.sync(categories);
+        } catch (error) {
+          const errMsg = error instanceof Error ? error.message : String(error);
+          log(`WARNING: File watcher sync failed: ${errMsg}`);
+        }
+      },
+    });
+    void activeWatcher.start();
+    log('File watcher started');
+  } catch (error) {
+    const errMsg = error instanceof Error ? error.message : String(error);
+    log(`WARNING: Failed to start file watcher: ${errMsg}`);
+  }
+}
+
+/** Start interval-based sync */
+function startIntervalSync(pathConfig: PathConfig): void {
+  const state = getPluginState();
+
+  if (!state.config?.continuousSync || !state.engine) {
+    return;
+  }
+
+  const intervalMs = state.config.syncIntervalMinutes * 60 * 1000;
+  const config = state.config;
+  const engine = state.engine;
+
+  syncInterval = setInterval(() => {
+    void (async () => {
+      try {
+        const { categories } = await loadLocalData(pathConfig, config.sync);
+        await engine.sync(categories);
+      } catch (error) {
+        const errMsg = error instanceof Error ? error.message : String(error);
+        log(`WARNING: Interval sync failed: ${errMsg}`);
+      }
+    })();
+  }, intervalMs);
+
+  const minutes = String(state.config.syncIntervalMinutes);
+  log(`Interval sync started (every ${minutes} min)`);
+}
+
+/** Stop all background sync operations */
+function stopBackgroundSync(): void {
+  if (activeWatcher) {
+    activeWatcher.stop();
+    activeWatcher = null;
+    log('File watcher stopped');
+  }
+
+  if (syncInterval) {
+    clearInterval(syncInterval);
+    syncInterval = null;
+    log('Interval sync stopped');
+  }
+}
+
+export const OpencodeSyncPlugin = async (_ctx: unknown): Promise<Record<string, unknown>> => {
   log('Plugin starting...');
 
   try {
@@ -170,10 +316,13 @@ export const OpencodeSyncPlugin = async (_ctx: any): Promise<Record<string, unkn
 
     if (isValid) {
       await ensureStorageExists(pathConfig);
+      performInitialSync(pathConfig);
+      startFileWatcher(pathConfig);
+      startIntervalSync(pathConfig);
       log('Plugin ready');
     }
 
-    return {};
+    return { cleanup: stopBackgroundSync };
   } catch (error) {
     const errMsg = error instanceof Error ? error.message : String(error);
     const stack = error instanceof Error ? error.stack : undefined;
