@@ -1,0 +1,5 @@
+# Run typecheck on entire codebase (required for type-aware linting)
+npm run typecheck
+
+# Run lint-staged for staged files only (lint + format)
+npx lint-staged

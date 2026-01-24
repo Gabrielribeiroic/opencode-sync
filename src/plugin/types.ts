@@ -1,0 +1,29 @@
+/**
+ * Plugin Types
+ *
+ * Type definitions for the OpenCode Sync plugin.
+ */
+
+import type { SyncConfig, LocalSyncState } from '../types/index.js';
+import type { SyncEngine } from '../sync/engine/index.js';
+import type { FileWatcher } from '../sync/watcher/index.js';
+
+export interface PluginState {
+  config: SyncConfig | null;
+  localState: LocalSyncState | null;
+  engine: SyncEngine | null;
+  watcher: FileWatcher | null;
+  passphrase: string | null;
+  isInitialized: boolean;
+}
+
+export function createInitialState(): PluginState {
+  return {
+    config: null,
+    localState: null,
+    engine: null,
+    watcher: null,
+    passphrase: null,
+    isInitialized: false,
+  };
+}
