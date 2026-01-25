@@ -4,26 +4,37 @@
 
 import { RepoApiError, RepoRateLimitError } from './errors.js';
 
+/** Default timeout for API requests (30 seconds) */
+const DEFAULT_TIMEOUT_MS = 30000;
+
 /**
- * Fetch with exponential backoff retry.
+ * Fetch with exponential backoff retry and timeout.
+ * Handles rate limits by waiting until reset time.
  */
 export async function fetchWithRetry(
   url: string,
   options: RequestInit,
   maxRetries: number,
-  retryDelayMs: number
+  retryDelayMs: number,
+  timeoutMs: number = DEFAULT_TIMEOUT_MS
 ): Promise<Response> {
   let lastError: Error | undefined;
 
   for (let attempt = 0; attempt <= maxRetries; attempt++) {
-    const result = await attemptFetch(url, options);
+    const result = await attemptFetch(url, options, timeoutMs);
     if (result.response) return result.response;
     if (result.shouldThrow && result.error) throw result.error;
     lastError = result.error;
 
     if (attempt < maxRetries) {
-      const delay = retryDelayMs * Math.pow(2, attempt);
-      await sleep(delay);
+      // For rate limit errors, wait until reset time (max 60s)
+      if (lastError instanceof RepoRateLimitError) {
+        const waitTime = Math.min(lastError.resetTimestamp * 1000 - Date.now(), 60000);
+        if (waitTime > 0) await sleep(waitTime);
+      } else {
+        const delay = retryDelayMs * Math.pow(2, attempt);
+        await sleep(delay);
+      }
     }
   }
 
@@ -36,32 +47,72 @@ interface FetchResult {
   shouldThrow?: boolean;
 }
 
-async function attemptFetch(url: string, options: RequestInit): Promise<FetchResult> {
+async function attemptFetch(
+  url: string,
+  options: RequestInit,
+  timeoutMs: number
+): Promise<FetchResult> {
   try {
-    const response = await fetch(url, options);
-    checkRateLimit(response);
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => {
+      controller.abort();
+    }, timeoutMs);
 
-    if (!response.ok) {
-      const error = await createApiError(response);
-      return { error, shouldThrow: isNonRetryableError(error) };
+    try {
+      const response = await fetch(url, { ...options, signal: controller.signal });
+      clearTimeout(timeoutId);
+      checkRateLimit(response);
+
+      if (!response.ok) {
+        const error = await createApiError(response);
+        return { error, shouldThrow: isNonRetryableError(error) };
+      }
+
+      return { response };
+    } finally {
+      clearTimeout(timeoutId);
     }
-
-    return { response };
   } catch (error) {
     const err = error as Error;
+    // Convert abort errors to timeout errors
+    if (err.name === 'AbortError') {
+      return {
+        error: new Error(`Request timeout after ${String(timeoutMs)}ms`),
+        shouldThrow: false,
+      };
+    }
     return { error: err, shouldThrow: isNonRetryableError(err) };
   }
 }
 
 function checkRateLimit(response: Response): void {
-  if (response.status !== 403) return;
+  // Handle 429 Too Many Requests
+  if (response.status === 429) {
+    const retryAfter = response.headers.get('Retry-After');
+    const resetTimestamp = retryAfter
+      ? Date.now() / 1000 + parseInt(retryAfter, 10)
+      : Date.now() / 1000 + 60;
+    throw new RepoRateLimitError(resetTimestamp);
+  }
 
-  const remaining = response.headers.get('X-RateLimit-Remaining');
-  if (remaining !== '0') return;
+  // Handle 403 with rate limit or abuse detection
+  if (response.status === 403) {
+    const remaining = response.headers.get('X-RateLimit-Remaining');
+    const retryAfter = response.headers.get('Retry-After');
 
-  const resetTime = response.headers.get('X-RateLimit-Reset');
-  const resetTimestamp = resetTime ? parseInt(resetTime, 10) : Date.now() / 1000 + 60;
-  throw new RepoRateLimitError(resetTimestamp);
+    // Secondary rate limit (abuse detection) includes Retry-After
+    if (retryAfter) {
+      const resetTimestamp = Date.now() / 1000 + parseInt(retryAfter, 10);
+      throw new RepoRateLimitError(resetTimestamp);
+    }
+
+    // Primary rate limit
+    if (remaining === '0') {
+      const resetTime = response.headers.get('X-RateLimit-Reset');
+      const resetTimestamp = resetTime ? parseInt(resetTime, 10) : Date.now() / 1000 + 60;
+      throw new RepoRateLimitError(resetTimestamp);
+    }
+  }
 }
 
 async function createApiError(response: Response): Promise<RepoApiError> {

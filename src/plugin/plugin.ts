@@ -217,18 +217,25 @@ function performInitialSync(pathConfig: PathConfig): void {
   void (async () => {
     try {
       log('Running initial sync in background...');
-      const { categories } = await loadLocalData(pathConfig, config.sync);
+      const loadStart = Date.now();
+      const { categories, errors } = await loadLocalData(pathConfig, config.sync);
+      log(`Loaded ${String(categories.length)} categories in ${String(Date.now() - loadStart)}ms`);
+      if (errors.length > 0) log(`Load errors: ${String(errors.length)}`);
+
+      const syncStart = Date.now();
       const result = await engine.sync(categories);
+      const dur = Date.now() - syncStart;
 
       if (result.success && result.action !== 'error') {
         await persistLocalState(pathConfig);
-        log(`Initial sync complete: ${result.message}`);
+        log(`Initial sync complete in ${String(dur)}ms: ${result.message}`);
       } else {
-        log(`Sync completed: ${result.message}`);
+        log(`Sync completed in ${String(dur)}ms: ${result.message}`);
       }
     } catch (error) {
       const errMsg = error instanceof Error ? error.message : String(error);
       log(`WARNING: Initial sync failed: ${errMsg}`);
+      if (error instanceof Error && error.stack) log(`Stack: ${error.stack}`);
     }
   })();
 }

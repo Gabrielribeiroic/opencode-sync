@@ -1,7 +1,6 @@
 import type { StorageBackend } from '../../storage/index.js';
 import { RepoConflictError } from '../../storage/index.js';
-import { compareVectorClocks } from '../vector-clock.js';
-import { needsPush } from '../operations/push.js';
+import { syncLog } from './logger.js';
 import { pullCategories } from '../operations/pull.js';
 import { mergeAllCategories } from '../operations/merge-operation.js';
 import {
@@ -25,7 +24,6 @@ import {
   buildPullResult,
   buildConflictResult,
   buildErrorResult,
-  buildNoChangeResult,
   buildSkippedResult,
   handleSyncError,
 } from './result.js';
@@ -38,6 +36,7 @@ import {
   buildCryptoOptions,
   extractTombstoneIds,
 } from './helpers.js';
+import { determineAction, executeRoute } from './routing.js';
 
 export { type CategoryData };
 
@@ -129,6 +128,7 @@ export class SyncEngine {
 
   private async performSync(data: CategoryData[]): Promise<SyncResult> {
     const m = await fetchManifest(this.backend);
+    syncLog(`[SYNC] Manifest: ${m ? 'found' : 'not found'}`);
     if (!m) return this.push(data);
     if (isLockedByOther(m, this.config.machineId, this.config.advisoryLockTimeoutSeconds))
       await sleep(2000);
@@ -136,21 +136,16 @@ export class SyncEngine {
   }
 
   private async routeByClockComparison(
-    data: CategoryData[],
+    d: CategoryData[],
     m: Manifest,
-    retry: number
+    r: number
   ): Promise<SyncResult> {
-    const cmp = compareVectorClocks(this.localState?.vectorClock ?? {}, m.vectorClock);
-    switch (cmp) {
-      case 'equal':
-        return needsPush(data, m) ? this.push(data, retry) : buildNoChangeResult();
-      case 'local-ahead':
-        return this.push(data, retry, m);
-      case 'remote-ahead':
-        return this.pull(m, data);
-      case 'concurrent':
-        return this.handleConflict(data, m, retry);
-    }
+    const route = determineAction(this.localState, m, d);
+    return executeRoute(route, {
+      push: () => this.push(d, r, m),
+      pull: () => this.pull(m, d),
+      conflict: () => this.handleConflict(d, m, r),
+    });
   }
 
   private async performPush(data: CategoryData[], remote?: Manifest): Promise<SyncResult> {
@@ -163,6 +158,8 @@ export class SyncEngine {
       existingFiles: existing,
     };
     const { files, manifest, changedCategories } = executePush(opts, remote);
+    const fileCount = Object.keys(files).length;
+    syncLog(`[SYNC] Push: ${String(fileCount)} files, ${String(existing.length)} existing`);
     await this.backend.updateFiles(
       toStorageFiles(files, MANIFEST_FILENAME, JSON.stringify(manifest, null, 2))
     );
@@ -185,11 +182,9 @@ export class SyncEngine {
       data
     );
     const { pulledData, changedCategories, tombstonedItems } = await pullCategories(opts);
-    // Merge local and pulled data for complete state tracking
-    // This ensures local-only items are tracked for subsequent push detection
+    syncLog(`[SYNC] Pull: ${String(changedCategories.length)} categories`);
     const mergedData = mergeDataForState(data, pulledData);
     this.localState = buildLocalState(m, mergedData, this.getStorageId(), this.config.machineId);
-    // Convert tombstonedItems to item ID arrays for the result
     const tombstoneIds = extractTombstoneIds(tombstonedItems);
     return buildPullResult({ changedCategories, pulledData, tombstonedItems: tombstoneIds });
   }

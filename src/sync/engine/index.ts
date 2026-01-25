@@ -18,4 +18,6 @@ export {
   buildNoChangeResult,
   handleSyncError,
 } from './result.js';
+export { syncLog, startOperation } from './logger.js';
 export { checkMaxRetries, calculateBackoff, sleep, MAX_CONFLICT_RETRIES } from './retry.js';
+export { determineAction, executeRoute } from './routing.js';

@@ -126,25 +126,51 @@ export class RepoStorageBackend implements StorageBackend {
   }
 
   public async updateFiles(files: Record<string, string | null>): Promise<void> {
+    const fileCount = Object.keys(files).length;
+    const startTime = Date.now();
+
     // Get current HEAD commit SHA
     const headSha = await this.getHeadSha();
 
     // Get current tree
     const currentTree = await this.getTree(headSha);
 
-    // Build new tree entries
+    // Build new tree entries (includes blob creation)
+    const blobStart = Date.now();
     const treeEntries = await this.buildTreeEntries(files, currentTree);
+    const blobDuration = Date.now() - blobStart;
+    this.logProgress(`Created ${String(treeEntries.length)} blobs in ${String(blobDuration)}ms`);
 
     // Create new tree
     const newTreeSha = await this.createTree(treeEntries, currentTree.sha);
 
     // Create commit
-    const fileCount = String(Object.keys(files).length);
-    const message = `Sync update: ${fileCount} files`;
+    const message = `Sync update: ${String(fileCount)} files`;
     const commitSha = await this.createCommit(message, newTreeSha, headSha);
 
     // Update HEAD ref
     await this.updateRef(commitSha);
+
+    const totalDuration = Date.now() - startTime;
+    this.logProgress(`Upload complete: ${String(fileCount)} files in ${String(totalDuration)}ms`);
+  }
+
+  /** Log progress for debugging */
+  private logProgress(message: string): void {
+    try {
+      // Use dynamic require to avoid module resolution issues
+      /* eslint-disable @typescript-eslint/no-require-imports */
+      const os = require('node:os') as { homedir: () => string };
+      const fs = require('node:fs') as { appendFileSync: (path: string, data: string) => void };
+      const path = require('node:path') as { join: (...parts: string[]) => string };
+      /* eslint-enable @typescript-eslint/no-require-imports */
+      const logDir = path.join(os.homedir(), '.local/share/opencode/log');
+      const logFile = path.join(logDir, 'opencode-sync.log');
+      const timestamp = new Date().toISOString();
+      fs.appendFileSync(logFile, `${timestamp} [opencode-sync] [REPO] ${message}\n`);
+    } catch {
+      // Ignore logging errors
+    }
   }
 
   public async listFiles(): Promise<StorageFile[]> {
@@ -329,26 +355,66 @@ export class RepoStorageBackend implements StorageBackend {
       .filter((e) => !updatedPaths.has(e.path))
       .map((e) => ({ path: e.path, mode: e.mode, type: e.type, sha: e.sha }));
 
-    // Add new/updated files
+    // Collect files that need blob creation
+    const filesToUpload: { path: string; content: string }[] = [];
     for (const [path, content] of Object.entries(files)) {
-      const fullPath = `${SYNC_DIR}/${path}`;
-
-      if (content === null) {
-        // File deletion - already excluded from entries
-        continue;
+      if (content !== null) {
+        filesToUpload.push({ path: `${SYNC_DIR}/${path}`, content });
       }
+    }
 
-      // Create blob for new content
-      const blobSha = await this.createBlob(content);
+    // Create blobs in small parallel batches with delays to avoid secondary rate limits
+    const BATCH_SIZE = 5;
+    const blobResults = await this.createBlobsInBatches(filesToUpload, BATCH_SIZE);
+
+    // Add new entries from batch results
+    for (const result of blobResults) {
       entries.push({
-        path: fullPath,
+        path: result.path,
         mode: '100644',
         type: 'blob',
-        sha: blobSha,
+        sha: result.sha,
       });
     }
 
     return entries;
+  }
+
+  /**
+   * Create blobs in parallel batches with rate limit protection.
+   * Uses small batches with delays to avoid GitHub's secondary rate limits.
+   */
+  private async createBlobsInBatches(
+    files: { path: string; content: string }[],
+    batchSize: number
+  ): Promise<{ path: string; sha: string }[]> {
+    const results: { path: string; sha: string }[] = [];
+    const totalBatches = Math.ceil(files.length / batchSize);
+
+    for (let i = 0; i < files.length; i += batchSize) {
+      const batchNum = Math.floor(i / batchSize) + 1;
+      const batch = files.slice(i, i + batchSize);
+
+      if (files.length > batchSize) {
+        this.logProgress(
+          `Batch ${String(batchNum)}/${String(totalBatches)} (${String(batch.length)} files)`
+        );
+      }
+
+      const batchPromises = batch.map(async (file) => {
+        const sha = await this.createBlob(file.content);
+        return { path: file.path, sha };
+      });
+      const batchResults = await Promise.all(batchPromises);
+      results.push(...batchResults);
+
+      // Add delay between batches to avoid secondary rate limits
+      if (i + batchSize < files.length) {
+        await new Promise((r) => setTimeout(r, 100));
+      }
+    }
+
+    return results;
   }
 
   private async createBlob(content: string): Promise<string> {
