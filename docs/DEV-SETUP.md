@@ -14,7 +14,7 @@ Guide for developers and LLM coding agents to set up a local development environ
 ### 1. Clone and Build
 
 ```bash
-git clone https://github.com/ercin/opencode-sync.git
+git clone https://github.com/ErcinDedeoglu/opencode-sync.git
 cd opencode-sync
 npm install
 npm run build

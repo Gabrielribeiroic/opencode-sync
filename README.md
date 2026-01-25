@@ -30,7 +30,7 @@ Clone into the global plugins directory:
 
 ```bash
 cd ~/.config/opencode/plugins
-git clone https://github.com/ercin/opencode-sync
+git clone https://github.com/ErcinDedeoglu/opencode-sync
 cd opencode-sync
 npm install && npm run build
 ```
@@ -39,7 +39,7 @@ Or for project-specific installation:
 
 ```bash
 cd your-project/.opencode/plugins
-git clone https://github.com/ercin/opencode-sync
+git clone https://github.com/ErcinDedeoglu/opencode-sync
 cd opencode-sync
 npm install && npm run build
 ```
