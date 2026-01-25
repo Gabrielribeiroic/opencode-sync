@@ -6,35 +6,13 @@
 
 import { calculateChecksum } from '../packer.js';
 import {
-  type ItemCategoryInfo,
   type ItemInfo,
   type CategoryShard,
   type ShardedCategoryRef,
   getShardFilename,
-  shouldShard,
 } from '../../types/index.js';
 import type { Tombstone } from '../../types/manifest.js';
 import type { PushContext, SyncCategory } from './types.js';
-
-export { shouldShard };
-
-/** Write inline item category (not sharded) to manifest */
-export function writeInlineItemCategory(
-  category: SyncCategory,
-  items: Record<string, ItemInfo>,
-  tombstones: Record<string, Tombstone>,
-  ctx: PushContext
-): void {
-  ctx.manifest.categories[category] = {
-    type: 'items',
-    items,
-    tombstones,
-    itemCount: Object.keys(items).length,
-    lastModified: ctx.now,
-    lastModifiedBy: ctx.machineId,
-    vectorClock: { [ctx.machineId]: ctx.newClock[ctx.machineId] ?? 1 },
-  } satisfies ItemCategoryInfo;
-}
 
 /**
  * Write a sharded category (items stored in separate shard file).

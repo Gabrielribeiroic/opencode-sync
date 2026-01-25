@@ -41,8 +41,6 @@ export {
   // Sharded manifest helpers
   isShardedRef,
   getShardFilename,
-  SHARDING_THRESHOLD,
-  shouldShard,
 } from './manifest.js';
 
 // Sync Operations

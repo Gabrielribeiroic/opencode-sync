@@ -125,14 +125,6 @@ export function getShardFilename(category: SyncCategory): string {
   return `manifest-${category}.json`;
 }
 
-/** Categories that should use sharding when item count exceeds threshold */
-export const SHARDING_THRESHOLD = 100;
-
-/** Check if a category should be sharded based on item count */
-export function shouldShard(itemCount: number): boolean {
-  return itemCount >= SHARDING_THRESHOLD;
-}
-
 /** Content of a category shard file */
 export interface CategoryShard {
   /** Category this shard belongs to */

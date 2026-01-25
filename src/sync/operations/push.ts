@@ -9,7 +9,7 @@ import {
   markOrphanedFiles,
   buildPushContext,
 } from './helpers.js';
-import { shouldShard, writeShardedCategory, writeInlineItemCategory } from './sharding.js';
+import { writeShardedCategory } from './sharding.js';
 import {
   type ItemCategoryInfo,
   type ItemInfo,
@@ -169,14 +169,9 @@ function packItemCategoryData(
     ctx.files[filename] = { content: null };
   }
   const newItems = removeItemsById(processed, tombResult.itemsToRemove);
-  const totalEntries = Object.keys(newItems).length + Object.keys(tombResult.tombstones).length;
 
-  // Use sharding if item count exceeds threshold
-  if (shouldShard(totalEntries)) {
-    writeShardedCategory(category, newItems, tombResult.tombstones, ctx);
-  } else {
-    writeInlineItemCategory(category, newItems, tombResult.tombstones, ctx);
-  }
+  // Always use sharding for item categories
+  writeShardedCategory(category, newItems, tombResult.tombstones, ctx);
 
   return filenames;
 }
