@@ -14,7 +14,7 @@ import {
   updateConfig,
   initializeEngine,
 } from './state-manager.js';
-import { getTokenSource, loadLocalData } from '../data/index.js';
+import { getTokenSource, loadLocalData, saveLocalState } from '../data/index.js';
 import { RepoStorageBackend } from '../storage/index.js';
 import { FileWatcher } from '../sync/watcher/index.js';
 import type { PluginState } from './types.js';
@@ -187,6 +187,16 @@ async function ensureStorageExists(pathConfig: PathConfig): Promise<void> {
   }
 }
 
+/** Persist engine's local state to disk after successful sync */
+async function persistLocalState(pathConfig: PathConfig): Promise<void> {
+  const state = getPluginState();
+  const newState = state.engine?.getLocalState();
+  if (newState) {
+    await saveLocalState(pathConfig, newState);
+    state.localState = newState;
+  }
+}
+
 /** Perform initial sync on plugin startup (non-blocking) */
 function performInitialSync(pathConfig: PathConfig): void {
   const state = getPluginState();
@@ -211,6 +221,7 @@ function performInitialSync(pathConfig: PathConfig): void {
       const result = await engine.sync(categories);
 
       if (result.success && result.action !== 'error') {
+        await persistLocalState(pathConfig);
         log(`Initial sync complete: ${result.message}`);
       } else {
         log(`Sync completed: ${result.message}`);
@@ -248,7 +259,10 @@ function startFileWatcher(pathConfig: PathConfig): void {
       onEvent: async () => {
         try {
           const { categories } = await loadLocalData(pathConfig, config.sync);
-          await engine.sync(categories);
+          const result = await engine.sync(categories);
+          if (result.success) {
+            await persistLocalState(pathConfig);
+          }
         } catch (error) {
           const errMsg = error instanceof Error ? error.message : String(error);
           log(`WARNING: File watcher sync failed: ${errMsg}`);
@@ -279,7 +293,21 @@ function startIntervalSync(pathConfig: PathConfig): void {
     void (async () => {
       try {
         const { categories } = await loadLocalData(pathConfig, config.sync);
-        await engine.sync(categories);
+        const result = await engine.sync(categories);
+        // Persist state after successful sync
+        if (result.success) {
+          await persistLocalState(pathConfig);
+        }
+        // Log interval sync results (both success and no-change)
+        if (result.action === 'pushed') {
+          log(`Interval sync: ${result.message}`);
+        } else if (result.action === 'pulled') {
+          log(`Interval sync: ${result.message}`);
+        } else if (result.action === 'no-change') {
+          // Don't log no-change to keep logs clean
+        } else if (result.action === 'error') {
+          log(`WARNING: Interval sync error: ${result.message}`);
+        }
       } catch (error) {
         const errMsg = error instanceof Error ? error.message : String(error);
         log(`WARNING: Interval sync failed: ${errMsg}`);

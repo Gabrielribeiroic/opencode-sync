@@ -99,6 +99,10 @@ On subsequent runs:
 | `fileWatcherDebounceMs` | number | `5000` | Wait after file change before sync |
 | `maxDebounceMs` | number | `30000` | Max wait during heavy activity |
 | `conflictStrategy` | string | `auto-merge` | How to resolve conflicts |
+| `advisoryLockTimeoutSeconds` | number | `30` | Lock timeout for concurrent sync prevention |
+| `maxRetryAttempts` | number | `3` | Max retries on transient failures |
+| `retryDelayMs` | number | `1000` | Delay between retry attempts |
+| `tombstoneGraceDays` | number | `30` | Days before deleted item markers expire |
 
 ## Sync Categories
 
@@ -151,6 +155,12 @@ All categories are enabled by default. Disable `messages` if you have very large
     "projects": true,
     "todos": true
   },
-  "conflictStrategy": "auto-merge"
+  "conflictStrategy": "auto-merge",
+  "advisoryLockTimeoutSeconds": 30,
+  "maxRetryAttempts": 3,
+  "retryDelayMs": 1000,
+  "tombstoneGraceDays": 30
 }
 ```
+
+Note: `machineId`, `keySalt`, and `passphraseHash` are auto-generated and should not be manually edited.

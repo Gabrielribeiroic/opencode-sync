@@ -14,7 +14,12 @@ import type { CategoryData } from '../operations/types.js';
 import type { SyncEngineOptions } from './types.js';
 import { MANIFEST_FILENAME } from './types.js';
 import { fetchManifest } from './manifest.js';
-import { buildLocalState, isLockedByOther, getStorageFilesMap } from './state.js';
+import {
+  buildLocalState,
+  isLockedByOther,
+  getStorageFilesMap,
+  mergeDataForState,
+} from './state.js';
 import {
   buildPushResult,
   buildPullResult,
@@ -180,7 +185,10 @@ export class SyncEngine {
       data
     );
     const { pulledData, changedCategories, tombstonedItems } = await pullCategories(opts);
-    this.localState = buildLocalState(m, pulledData, this.getStorageId(), this.config.machineId);
+    // Merge local and pulled data for complete state tracking
+    // This ensures local-only items are tracked for subsequent push detection
+    const mergedData = mergeDataForState(data, pulledData);
+    this.localState = buildLocalState(m, mergedData, this.getStorageId(), this.config.machineId);
     // Convert tombstonedItems to item ID arrays for the result
     const tombstoneIds = extractTombstoneIds(tombstonedItems);
     return buildPullResult({ changedCategories, pulledData, tombstonedItems: tombstoneIds });
