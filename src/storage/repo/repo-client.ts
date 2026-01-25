@@ -103,33 +103,11 @@ export class RepoStorageBackend implements StorageBackend {
 
   public async getFile(path: string): Promise<string | null> {
     const fullPath = `${SYNC_DIR}/${path}`;
-    // Add cache-bust to avoid stale GitHub API responses
+    const branch = await this.getBranch();
+    // Use raw.githubusercontent.com with cache-bust to avoid stale CDN responses
     const cacheBust = Date.now();
-    const res = await this.fetchAllowNotFound(`/contents/${fullPath}?cb=${String(cacheBust)}`);
-    if (!res?.ok) return null;
-
-    const data = (await res.json()) as ContentFile;
-
-    // For files >1MB, GitHub returns empty content and provides download_url
-    if (!data.content && data.size > 1000000) {
-      const branch = await this.getBranch();
-      // Add cache-bust to avoid stale CDN responses
-      const downloadUrl = `https://raw.githubusercontent.com/${this.owner}/${this.repo}/${branch}/${fullPath}?cb=${String(cacheBust)}`;
-      const downloadRes = await fetchWithRetry(
-        downloadUrl,
-        {
-          headers: { Authorization: `Bearer ${this.token}` },
-        },
-        this.maxRetries,
-        this.retryDelayMs
-      );
-
-      if (!downloadRes.ok) return null;
-      return await downloadRes.text();
-    }
-
-    if (!data.content) return null;
-    return Buffer.from(data.content, 'base64').toString('utf-8');
+    const url = `https://raw.githubusercontent.com/${this.owner}/${this.repo}/${branch}/${fullPath}?cb=${String(cacheBust)}`;
+    return await this.fetchRawFile(url);
   }
 
   public async updateFiles(files: Record<string, string | null>): Promise<void> {
