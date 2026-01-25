@@ -13,21 +13,9 @@ export interface PathConfig {
 }
 
 export function getPathConfig(homeDir: string): PathConfig {
-  const isWindows = process.platform === 'win32';
-
-  if (isWindows) {
-    const appData = process.env['APPDATA'] ?? `${homeDir}\\AppData\\Roaming`;
-    const localAppData = process.env['LOCALAPPDATA'] ?? `${homeDir}\\AppData\\Local`;
-
-    return {
-      configDir: `${appData}\\opencode`,
-      stateDir: `${localAppData}\\opencode`,
-      dataDir: `${localAppData}\\opencode`,
-      pluginConfigPath: `${appData}\\opencode\\opencode-sync.json`,
-      localStatePath: `${localAppData}\\opencode\\opencode-sync-state.json`,
-    };
-  }
-
+  // OpenCode uses xdg-basedir which applies XDG-style paths on ALL platforms
+  // including Windows. See: https://github.com/sindresorhus/xdg-basedir
+  // This means ~/.config, ~/.local/share, ~/.local/state are used everywhere.
   return {
     configDir: `${homeDir}/.config/opencode`,
     stateDir: `${homeDir}/.local/state/opencode`,
@@ -42,20 +30,10 @@ export function getCategoryPaths(pathConfig: PathConfig): Record<SyncCategory, s
   return {
     config: [
       `${pathConfig.configDir}/opencode.json`,
-      `${pathConfig.configDir}/opencode.jsonc`,
-      `${pathConfig.configDir}/AGENTS.md`,
-      `${pathConfig.configDir}/agent`,
-      `${pathConfig.configDir}/command`,
-      `${pathConfig.configDir}/mode`,
-      `${pathConfig.configDir}/tool`,
-      `${pathConfig.configDir}/plugin`,
-      `${pathConfig.configDir}/themes`,
+      `${pathConfig.configDir}/commands`,
+      `${pathConfig.configDir}/plugins`,
     ],
-    state: [
-      `${pathConfig.stateDir}/model.json`,
-      `${pathConfig.stateDir}/prompt-history.jsonl`,
-      `${pathConfig.stateDir}/prompt-stash.jsonl`,
-    ],
+    state: [`${pathConfig.stateDir}/model.json`, `${pathConfig.stateDir}/prompt-history.jsonl`],
     credentials: [`${pathConfig.dataDir}/auth.json`, `${pathConfig.dataDir}/mcp-auth.json`],
     sessions: [`${pathConfig.dataDir}/storage/session`],
     messages: [`${pathConfig.dataDir}/storage/message`, `${pathConfig.dataDir}/storage/part`],
