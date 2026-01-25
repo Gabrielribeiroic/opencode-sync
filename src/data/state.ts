@@ -4,9 +4,10 @@
  * Persists and loads local sync state and configuration.
  */
 
-import { readFile, writeFile, mkdir } from 'node:fs/promises';
+import { readFile, writeFile, mkdir, rename, unlink } from 'node:fs/promises';
 import { randomUUID } from 'node:crypto';
 import { hostname } from 'node:os';
+import { dirname } from 'node:path';
 import type { SyncConfig, LocalSyncState, PathConfig } from '../types/index.js';
 import { DEFAULT_CONFIG } from '../types/index.js';
 
@@ -74,11 +75,10 @@ export function getTokenSource(): 'config' | 'env' | 'none' {
 }
 
 /**
- * Save plugin configuration to disk.
+ * Save plugin configuration to disk (atomic write).
  */
 export async function saveConfig(pathConfig: PathConfig, config: SyncConfig): Promise<void> {
-  await ensureDir(pathConfig.configDir);
-  await writeFile(pathConfig.pluginConfigPath, JSON.stringify(config, null, 2), 'utf-8');
+  await atomicWriteFile(pathConfig.pluginConfigPath, JSON.stringify(config, null, 2));
 }
 
 /**
@@ -94,11 +94,10 @@ export async function loadLocalState(pathConfig: PathConfig): Promise<LocalSyncS
 }
 
 /**
- * Save local sync state to disk.
+ * Save local sync state to disk (atomic write).
  */
 export async function saveLocalState(pathConfig: PathConfig, state: LocalSyncState): Promise<void> {
-  await ensureDir(pathConfig.dataDir);
-  await writeFile(pathConfig.localStatePath, JSON.stringify(state, null, 2), 'utf-8');
+  await atomicWriteFile(pathConfig.localStatePath, JSON.stringify(state, null, 2));
 }
 
 /**
@@ -139,4 +138,26 @@ export function createInitialConfig(token: string, defaults: typeof DEFAULT_CONF
  */
 async function ensureDir(dirPath: string): Promise<void> {
   await mkdir(dirPath, { recursive: true });
+}
+
+/**
+ * Atomically write a file using write-to-temp-then-rename pattern.
+ * This prevents partial writes from corrupting files when multiple
+ * processes write simultaneously.
+ */
+async function atomicWriteFile(filePath: string, content: string): Promise<void> {
+  const tempPath = `${filePath}.${String(process.pid)}.tmp`;
+  await ensureDir(dirname(filePath));
+  try {
+    await writeFile(tempPath, content, 'utf-8');
+    await rename(tempPath, filePath);
+  } catch (error) {
+    // Clean up temp file on error
+    try {
+      await unlink(tempPath);
+    } catch {
+      // Ignore cleanup errors
+    }
+    throw error;
+  }
 }

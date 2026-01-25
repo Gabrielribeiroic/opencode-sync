@@ -6,7 +6,7 @@
 
 import type { PathConfig } from '../types/paths.js';
 import { DEFAULT_CONFIG, type SyncConfig, type SyncCategory } from '../types/index.js';
-import { SyncEngine } from '../sync/engine/index.js';
+import { SyncEngine, type SyncEngineOptions } from '../sync/engine/index.js';
 import { RepoStorageBackend, type RepoClientConfig } from '../storage/index.js';
 import { createFileWatcher } from '../sync/watcher/index.js';
 import { loadConfig, saveConfig, loadLocalState, generateMachineId } from '../data/index.js';
@@ -19,6 +19,7 @@ const state: PluginState = createInitialState();
  * Initialize the plugin state from disk.
  */
 export async function initializeState(pathConfig: PathConfig): Promise<void> {
+  state.pathConfig = pathConfig;
   state.config = await loadConfig(pathConfig);
   state.localState = await loadLocalState(pathConfig);
 }
@@ -50,22 +51,21 @@ export function initializeEngine(): void {
   // Support key rotation: oldEncryptionKey from config is used as fallback for decryption
   const oldKey = state.oldPassphrase ?? state.config.oldEncryptionKey;
 
-  state.engine = new SyncEngine(
-    oldKey
-      ? {
-          config: state.config,
-          backend,
-          localState: state.localState,
-          passphrase: state.passphrase ?? undefined,
-          oldPassphrase: oldKey,
-        }
-      : {
-          config: state.config,
-          backend,
-          localState: state.localState,
-          passphrase: state.passphrase ?? undefined,
-        }
-  );
+  // Build engine options, conditionally adding optional properties
+  const engineOptions: SyncEngineOptions = {
+    config: state.config,
+    backend,
+    localState: state.localState,
+    passphrase: state.passphrase ?? undefined,
+  };
+  if (oldKey) {
+    engineOptions.oldPassphrase = oldKey;
+  }
+  if (state.pathConfig?.lockPath) {
+    engineOptions.lockPath = state.pathConfig.lockPath;
+  }
+
+  state.engine = new SyncEngine(engineOptions);
 
   state.isInitialized = true;
 }

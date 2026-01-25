@@ -24,9 +24,11 @@ import {
   buildConflictResult,
   buildErrorResult,
   buildNoChangeResult,
+  buildSkippedResult,
   handleSyncError,
 } from './result.js';
 import { checkMaxRetries, calculateBackoff, sleep } from './retry.js';
+import { acquireLock, releaseLock, getLockHolder } from '../local-lock.js';
 
 export { type CategoryData };
 
@@ -36,6 +38,7 @@ export class SyncEngine {
   private localState: LocalSyncState | null;
   private readonly passphrase: string | undefined;
   private readonly oldPassphrase: string | undefined;
+  private readonly lockPath: string | undefined;
 
   constructor(options: SyncEngineOptions) {
     this.backend = options.backend;
@@ -43,6 +46,7 @@ export class SyncEngine {
     this.localState = options.localState;
     this.passphrase = options.passphrase;
     this.oldPassphrase = options.oldPassphrase;
+    this.lockPath = options.lockPath;
   }
 
   /** Get crypto options for encryption/decryption with key rotation support */
@@ -55,10 +59,19 @@ export class SyncEngine {
 
   public async sync(localData: CategoryData[]): Promise<SyncResult> {
     if (!this.hasStorageConfigured()) return buildErrorResult('No storage configured');
+
+    // Acquire local lock to prevent concurrent syncs on same machine
+    if (this.lockPath && !acquireLock(this.lockPath, 'sync')) {
+      const holder = getLockHolder(this.lockPath);
+      return buildSkippedResult(`Another instance is syncing${holder ? ` (${holder})` : ''}`);
+    }
+
     try {
       return await this.performSync(localData);
     } catch (error) {
       return handleSyncError(error);
+    } finally {
+      if (this.lockPath) releaseLock(this.lockPath);
     }
   }
 

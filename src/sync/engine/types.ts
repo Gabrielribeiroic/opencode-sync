@@ -15,6 +15,8 @@ export interface SyncEngineOptions {
   passphrase: string | undefined;
   /** Previous encryption key for key rotation */
   oldPassphrase?: string;
+  /** Lock file path for multi-instance coordination */
+  lockPath?: string;
 }
 
 /** Get crypto options from engine options */

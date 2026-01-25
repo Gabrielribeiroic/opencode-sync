@@ -63,6 +63,13 @@ export function buildNoChangeResult(): SyncResult {
 }
 
 /**
+ * Build a skipped result (e.g., when another instance holds the lock).
+ */
+export function buildSkippedResult(reason: string): SyncResult {
+  return { success: true, action: 'no-change', message: `Skipped: ${reason}` };
+}
+
+/**
  * Convert an unknown error to SyncResult.
  */
 export function handleSyncError(error: unknown): SyncResult {

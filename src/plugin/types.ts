@@ -5,6 +5,7 @@
  */
 
 import type { SyncConfig, LocalSyncState } from '../types/index.js';
+import type { PathConfig } from '../types/paths.js';
 import type { SyncEngine } from '../sync/engine/index.js';
 import type { FileWatcher } from '../sync/watcher/index.js';
 
@@ -17,6 +18,8 @@ export interface PluginState {
   /** Previous encryption key for key rotation */
   oldPassphrase: string | null;
   isInitialized: boolean;
+  /** Path configuration for lock file and other paths */
+  pathConfig: PathConfig | null;
 }
 
 export function createInitialState(): PluginState {
@@ -28,5 +31,6 @@ export function createInitialState(): PluginState {
     passphrase: null,
     oldPassphrase: null,
     isInitialized: false,
+    pathConfig: null,
   };
 }

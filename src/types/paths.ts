@@ -10,6 +10,8 @@ export interface PathConfig {
   dataDir: string;
   pluginConfigPath: string;
   localStatePath: string;
+  /** Lock file path for multi-instance coordination */
+  lockPath: string;
 }
 
 export function getPathConfig(homeDir: string): PathConfig {
@@ -22,6 +24,7 @@ export function getPathConfig(homeDir: string): PathConfig {
     dataDir: `${homeDir}/.local/share/opencode`,
     pluginConfigPath: `${homeDir}/.config/opencode/opencode-sync.json`,
     localStatePath: `${homeDir}/.local/share/opencode/opencode-sync-state.json`,
+    lockPath: `${homeDir}/.local/share/opencode/.opencode-sync.lock`,
   };
 }
 
