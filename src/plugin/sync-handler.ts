@@ -62,7 +62,8 @@ async function handleSyncSuccess(
   const newState = state.engine?.getLocalState();
 
   // Write pulled data to local filesystem
-  if (result.action === 'pulled' || result.action === 'merged') {
+  // This includes data from pull, merge, AND remote items fetched during push
+  if (result.action === 'pulled' || result.action === 'merged' || result.action === 'pushed') {
     syncLog(
       `[WRITE] Action: ${result.action}, pulledData: ${result.pulledData ? 'present' : 'missing'}`
     );

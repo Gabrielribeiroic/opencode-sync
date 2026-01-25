@@ -26,6 +26,7 @@ import {
   extractTombstoneIds,
   fetchResolvedShards,
 } from './helpers.js';
+import { fetchRemoteItemsNotLocal } from './remote-fetch.js';
 
 export interface OperationContext {
   backend: StorageBackend;
@@ -44,7 +45,7 @@ export async function executePushOperation(
   ctx: PushContext,
   data: CategoryData[],
   remote?: Manifest
-): Promise<{ result: SyncResult; newState: LocalSyncState }> {
+): Promise<{ result: SyncResult; newState: LocalSyncState; remoteItems?: CategoryData[] }> {
   const existing = (await ctx.backend.listFiles()).map((f) => f.filename);
 
   // Pre-fetch shards for sharded categories to enable proper merging
@@ -64,7 +65,22 @@ export async function executePushOperation(
     toStorageFiles(files, MANIFEST_FILENAME, JSON.stringify(manifest, null, 2))
   );
   const newState = buildLocalState(manifest, data, ctx.getStorageId(), ctx.config.machineId);
-  return { result: buildPushResult(changedCategories), newState };
+
+  // Fetch remote items we don't have locally (for writing to disk)
+  const remoteItems = resolvedShards
+    ? await fetchRemoteItemsNotLocal(ctx.backend, resolvedShards, data)
+    : undefined;
+
+  const result = buildPushResult({
+    changedCategories,
+    pulledData: remoteItems && remoteItems.length > 0 ? remoteItems : undefined,
+  });
+
+  // Only include remoteItems in return if there are any
+  if (remoteItems && remoteItems.length > 0) {
+    return { result, newState, remoteItems };
+  }
+  return { result, newState };
 }
 
 /** Execute a pull operation and return updated local state */

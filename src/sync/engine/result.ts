@@ -6,16 +6,34 @@
 
 import type { SyncResult, ConflictInfo, SyncCategory } from '../../types/index.js';
 
+/** Options for building push result */
+export interface BuildPushResultOptions {
+  changedCategories: SyncCategory[];
+  pulledData?: unknown;
+}
+
 /**
  * Build a success result for push operations.
  */
-export function buildPushResult(changedCategories: SyncCategory[]): SyncResult {
-  return {
+export function buildPushResult(
+  changedCategoriesOrOpts: SyncCategory[] | BuildPushResultOptions
+): SyncResult {
+  // Support both old signature (array) and new signature (options object)
+  const opts = Array.isArray(changedCategoriesOrOpts)
+    ? { changedCategories: changedCategoriesOrOpts }
+    : changedCategoriesOrOpts;
+
+  const { changedCategories, pulledData } = opts;
+  const result: SyncResult = {
     success: true,
     action: 'pushed',
     message: `Pushed ${String(changedCategories.length)} categories`,
     changedCategories,
   };
+  if (pulledData) {
+    result.pulledData = pulledData;
+  }
+  return result;
 }
 
 /** Options for building pull result */
