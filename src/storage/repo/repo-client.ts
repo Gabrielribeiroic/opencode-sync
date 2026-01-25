@@ -193,18 +193,18 @@ export class RepoStorageBackend implements StorageBackend {
   }
 
   /**
-   * Fetch files via raw.githubusercontent.com (no API rate limits).
-   * All fetches run in parallel - raw content endpoint has no rate limiting.
-   * Adds cache-bust parameter to bypass CDN caching issues.
+   * Fetch files via raw.githubusercontent.com with API fallback.
+   * Uses raw endpoint first (no rate limits), falls back to Contents API
+   * for files not found (CDN caching can cause stale 404s).
    */
   private async fetchFilesViaRaw(
     paths: string[]
   ): Promise<{ path: string; content: string | null }[]> {
     const branch = await this.getBranch();
     const baseUrl = `https://raw.githubusercontent.com/${this.owner}/${this.repo}/${branch}`;
-    // Add cache-bust to avoid stale CDN responses after recent pushes
     const cacheBust = Date.now();
 
+    // First pass: try raw.githubusercontent.com (fast, no rate limits)
     const results = await Promise.all(
       paths.map(async (path) => {
         const content = await this.fetchRawFile(
@@ -214,7 +214,63 @@ export class RepoStorageBackend implements StorageBackend {
       })
     );
 
+    // Find files that returned null (might be CDN cache issue)
+    const missingPaths = results.filter((r) => r.content === null).map((r) => r.path);
+
+    // Fallback: use Contents API for missing files (rate limited but fresh)
+    if (missingPaths.length > 0) {
+      this.logProgress(`Raw CDN missed ${String(missingPaths.length)} files, using API fallback`);
+      const apiFetched = await this.fetchFilesViaContentsApi(missingPaths);
+      // Merge API results back
+      for (const result of results) {
+        const apiContent = apiFetched[result.path];
+        if (result.content === null && apiContent !== undefined) {
+          result.content = apiContent;
+        }
+      }
+    }
+
     return results;
+  }
+
+  /**
+   * Fetch files via Contents API (fallback for CDN cache misses).
+   * This is rate-limited but always returns fresh data.
+   */
+  private async fetchFilesViaContentsApi(paths: string[]): Promise<Record<string, string | null>> {
+    const results: Record<string, string | null> = {};
+
+    // Fetch in parallel but limit concurrency to avoid rate limits
+    const batchSize = 10;
+    for (let i = 0; i < paths.length; i += batchSize) {
+      const batch = paths.slice(i, i + batchSize);
+      const batchResults = await Promise.all(
+        batch.map(async (path) => {
+          const content = await this.fetchFileViaContentsApi(path);
+          return { path, content };
+        })
+      );
+      for (const { path, content } of batchResults) {
+        results[path] = content;
+      }
+    }
+
+    return results;
+  }
+
+  /** Fetch a single file via Contents API */
+  private async fetchFileViaContentsApi(path: string): Promise<string | null> {
+    try {
+      const res = await this.fetchAllowNotFound(`/contents/${SYNC_DIR}/${path}`);
+      if (!res?.ok) return null;
+
+      const data = (await res.json()) as { content?: string; encoding?: string };
+      if (!data.content || data.encoding !== 'base64') return null;
+
+      return Buffer.from(data.content, 'base64').toString('utf-8');
+    } catch {
+      return null;
+    }
   }
 
   /** Fetch a single file from raw.githubusercontent.com */
