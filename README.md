@@ -114,6 +114,7 @@ See [Configuration Guide](docs/CONFIG.md) for all options.
 | [Development Setup](docs/DEV-SETUP.md) | Local development environment |
 | [Publishing](docs/PUBLISH.md) | npm release process |
 | [LLM Installation](docs/LLM-INSTALL.md) | Instructions for AI coding agents |
+| [TODO](docs/TODO.md) | Future improvements |
 
 ## License
 

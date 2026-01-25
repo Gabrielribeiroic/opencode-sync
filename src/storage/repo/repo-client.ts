@@ -31,17 +31,21 @@ interface GitRef {
   object: { sha: string; type: string };
 }
 
-interface GitTree {
-  sha: string;
-  tree: { path: string; mode: string; type: string; sha: string }[];
-}
-
-interface GitBlob {
+interface GitTreeResponse {
   sha: string;
 }
 
 interface GitCommit {
   sha: string;
+}
+
+/** Tree entry for GitHub API - can use either sha (existing blob) or content (inline) */
+interface TreeEntry {
+  path: string;
+  mode: string;
+  type: string;
+  sha?: string | null;
+  content?: string;
 }
 
 interface ContentFile {
@@ -132,17 +136,12 @@ export class RepoStorageBackend implements StorageBackend {
     // Get current HEAD commit SHA
     const headSha = await this.getHeadSha();
 
-    // Get current tree
-    const currentTree = await this.getTree(headSha);
+    // Build tree entries with inline content (no separate blob creation needed)
+    const treeEntries = this.buildTreeEntries(files);
+    this.logProgress(`Prepared ${String(treeEntries.length)} tree entries`);
 
-    // Build new tree entries (includes blob creation)
-    const blobStart = Date.now();
-    const treeEntries = await this.buildTreeEntries(files, currentTree);
-    const blobDuration = Date.now() - blobStart;
-    this.logProgress(`Created ${String(treeEntries.length)} blobs in ${String(blobDuration)}ms`);
-
-    // Create new tree
-    const newTreeSha = await this.createTree(treeEntries, currentTree.sha);
+    // Create new tree with base_tree for incremental update
+    const newTreeSha = await this.createTree(treeEntries, headSha);
 
     // Create commit
     const message = `Sync update: ${String(fileCount)} files`;
@@ -152,7 +151,9 @@ export class RepoStorageBackend implements StorageBackend {
     await this.updateRef(commitSha);
 
     const totalDuration = Date.now() - startTime;
-    this.logProgress(`Upload complete: ${String(fileCount)} files in ${String(totalDuration)}ms`);
+    this.logProgress(
+      `Upload complete: ${String(fileCount)} files in ${String(totalDuration)}ms (~5 API calls)`
+    );
   }
 
   /** Log progress for debugging */
@@ -183,6 +184,66 @@ export class RepoStorageBackend implements StorageBackend {
       sha: f.sha,
       size: f.size,
     }));
+  }
+
+  /**
+   * Bulk fetch multiple files using raw.githubusercontent.com.
+   * No API rate limits - all files fetched in parallel.
+   */
+  public async getFiles(paths: string[]): Promise<Record<string, string | null>> {
+    if (paths.length === 0) return {};
+
+    const startTime = Date.now();
+    const fetched = await this.fetchFilesViaRaw(paths);
+
+    const result: Record<string, string | null> = {};
+    for (const { path, content } of fetched) {
+      result[path] = content;
+    }
+
+    const duration = Date.now() - startTime;
+    const found = fetched.filter((f) => f.content !== null).length;
+    this.logProgress(
+      `Bulk fetch: ${String(found)}/${String(paths.length)} files in ${String(duration)}ms (0 API calls)`
+    );
+
+    return result;
+  }
+
+  /**
+   * Fetch files via raw.githubusercontent.com (no API rate limits).
+   * All fetches run in parallel - raw content endpoint has no rate limiting.
+   */
+  private async fetchFilesViaRaw(
+    paths: string[]
+  ): Promise<{ path: string; content: string | null }[]> {
+    const branch = await this.getBranch();
+    const baseUrl = `https://raw.githubusercontent.com/${this.owner}/${this.repo}/${branch}`;
+
+    const results = await Promise.all(
+      paths.map(async (path) => {
+        const content = await this.fetchRawFile(`${baseUrl}/${SYNC_DIR}/${path}`);
+        return { path, content };
+      })
+    );
+
+    return results;
+  }
+
+  /** Fetch a single file from raw.githubusercontent.com */
+  private async fetchRawFile(url: string): Promise<string | null> {
+    try {
+      const res = await fetchWithRetry(
+        url,
+        { headers: { Authorization: `Bearer ${this.token}` } },
+        this.maxRetries,
+        this.retryDelayMs
+      );
+      if (!res.ok) return null;
+      return await res.text();
+    } catch {
+      return null;
+    }
   }
 
   // --- Private helpers ---
@@ -336,114 +397,43 @@ export class RepoStorageBackend implements StorageBackend {
     return data.object.sha;
   }
 
-  private async getTree(commitSha: string): Promise<GitTree> {
-    const res = await this.fetch(`/git/trees/${commitSha}?recursive=1`);
-    if (!res.ok) {
-      throw new RepoApiError('Failed to get tree', res.status);
-    }
-    return (await res.json()) as GitTree;
-  }
+  /**
+   * Build tree entries with inline content.
+   * Uses GitHub's ability to accept `content` directly instead of blob SHA,
+   * reducing API calls from N+5 to just 5 (regardless of file count).
+   */
+  private buildTreeEntries(files: Record<string, string | null>): TreeEntry[] {
+    const entries: TreeEntry[] = [];
 
-  private async buildTreeEntries(
-    files: Record<string, string | null>,
-    currentTree: GitTree
-  ): Promise<{ path: string; mode: string; type: string; sha?: string | null }[]> {
-    // Start with existing tree entries (excluding ones we're updating/deleting)
-    const updatedPaths = new Set(Object.keys(files).map((p) => `${SYNC_DIR}/${p}`));
-
-    const entries = currentTree.tree
-      .filter((e) => !updatedPaths.has(e.path))
-      .map((e) => ({ path: e.path, mode: e.mode, type: e.type, sha: e.sha }));
-
-    // Collect files that need blob creation
-    const filesToUpload: { path: string; content: string }[] = [];
     for (const [path, content] of Object.entries(files)) {
-      if (content !== null) {
-        filesToUpload.push({ path: `${SYNC_DIR}/${path}`, content });
+      const fullPath = `${SYNC_DIR}/${path}`;
+      if (content === null) {
+        // Delete file by setting sha to null
+        entries.push({ path: fullPath, mode: '100644', type: 'blob', sha: null });
+      } else {
+        // Add/update file with inline content (no blob creation needed!)
+        entries.push({ path: fullPath, mode: '100644', type: 'blob', content });
       }
-    }
-
-    // Create blobs in small parallel batches with delays to avoid secondary rate limits
-    const BATCH_SIZE = 5;
-    const blobResults = await this.createBlobsInBatches(filesToUpload, BATCH_SIZE);
-
-    // Add new entries from batch results
-    for (const result of blobResults) {
-      entries.push({
-        path: result.path,
-        mode: '100644',
-        type: 'blob',
-        sha: result.sha,
-      });
     }
 
     return entries;
   }
 
   /**
-   * Create blobs in parallel batches with rate limit protection.
-   * Uses small batches with delays to avoid GitHub's secondary rate limits.
+   * Create a new tree using base_tree for incremental updates.
+   * Entries can use either `sha` (for existing blobs) or `content` (inline).
    */
-  private async createBlobsInBatches(
-    files: { path: string; content: string }[],
-    batchSize: number
-  ): Promise<{ path: string; sha: string }[]> {
-    const results: { path: string; sha: string }[] = [];
-    const totalBatches = Math.ceil(files.length / batchSize);
-
-    for (let i = 0; i < files.length; i += batchSize) {
-      const batchNum = Math.floor(i / batchSize) + 1;
-      const batch = files.slice(i, i + batchSize);
-
-      if (files.length > batchSize) {
-        this.logProgress(
-          `Batch ${String(batchNum)}/${String(totalBatches)} (${String(batch.length)} files)`
-        );
-      }
-
-      const batchPromises = batch.map(async (file) => {
-        const sha = await this.createBlob(file.content);
-        return { path: file.path, sha };
-      });
-      const batchResults = await Promise.all(batchPromises);
-      results.push(...batchResults);
-
-      // Add delay between batches to avoid secondary rate limits
-      if (i + batchSize < files.length) {
-        await new Promise((r) => setTimeout(r, 100));
-      }
-    }
-
-    return results;
-  }
-
-  private async createBlob(content: string): Promise<string> {
-    const body = JSON.stringify({
-      content: Buffer.from(content).toString('base64'),
-      encoding: 'base64',
-    });
-
-    const res = await this.fetch('/git/blobs', { method: 'POST', body });
-    if (!res.ok) {
-      throw new RepoApiError('Failed to create blob', res.status);
-    }
-
-    const data = (await res.json()) as GitBlob;
-    return data.sha;
-  }
-
-  private async createTree(
-    entries: { path: string; mode: string; type: string; sha?: string | null }[],
-    baseSha?: string
-  ): Promise<string> {
+  private async createTree(entries: TreeEntry[], baseSha: string): Promise<string> {
     const body = JSON.stringify({
       base_tree: baseSha,
-      tree: entries.map((e) => ({
-        path: e.path,
-        mode: e.mode,
-        type: e.type,
-        sha: e.sha,
-      })),
+      tree: entries.map((e) => {
+        if (e.content !== undefined) {
+          // Inline content - GitHub will create the blob automatically
+          return { path: e.path, mode: e.mode, type: e.type, content: e.content };
+        }
+        // Delete (sha: null) or reference existing blob
+        return { path: e.path, mode: e.mode, type: e.type, sha: e.sha };
+      }),
     });
 
     const res = await this.fetch('/git/trees', { method: 'POST', body });
@@ -451,7 +441,7 @@ export class RepoStorageBackend implements StorageBackend {
       throw new RepoApiError('Failed to create tree', res.status);
     }
 
-    const data = (await res.json()) as GitTree;
+    const data = (await res.json()) as GitTreeResponse;
     return data.sha;
   }
 

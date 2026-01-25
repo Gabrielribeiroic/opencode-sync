@@ -32,6 +32,9 @@ export interface StorageBackend {
   /** Get file content by path */
   getFile(path: string): Promise<string | null>;
 
+  /** Get multiple files in bulk (optimized for fewer API calls) */
+  getFiles(paths: string[]): Promise<Record<string, string | null>>;
+
   /** Update multiple files atomically (null value = delete) */
   updateFiles(files: Record<string, string | null>): Promise<void>;
 

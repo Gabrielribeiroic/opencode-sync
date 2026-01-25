@@ -10,7 +10,7 @@ import { unpackItem, diffItems } from '../item-packer.js';
 import { maybeDecrypt } from './helpers.js';
 import { fetchCategoryShard } from '../engine/manifest.js';
 import type { StorageBackend } from '../../storage/index.js';
-import type { PackedChunk, BlobCategoryInfo, ItemInfo, SyncCategory } from '../../types/index.js';
+import type { PackedChunk, BlobCategoryInfo, SyncCategory } from '../../types/index.js';
 import type { ItemCategoryInfo, Tombstone, ShardedCategoryRef } from '../../types/manifest.js';
 import type {
   CategoryData,
@@ -145,9 +145,53 @@ async function pullBlobCategory(
   return maybeDecrypt(category, data, passphrase);
 }
 
+/** Info about a file to fetch */
+interface FetchInfo {
+  itemId: string;
+  filename: string;
+  checksum: string;
+}
+
+/** Build list of files that need to be fetched */
+function buildFetchList(
+  toDownload: string[],
+  itemsInfo: Record<string, { filename: string; checksum: string }>
+): FetchInfo[] {
+  const list: FetchInfo[] = [];
+  for (const itemId of toDownload) {
+    const info = itemsInfo[itemId];
+    if (info) list.push({ itemId, filename: info.filename, checksum: info.checksum });
+  }
+  return list;
+}
+
+/** Process fetched content and unpack items */
+function processDownloads(
+  filesToFetch: FetchInfo[],
+  contents: Record<string, string | null>
+): { items: Record<string, string>; checksums: Record<string, string> } {
+  const items: Record<string, string> = {};
+  const checksums: Record<string, string> = {};
+
+  for (const { itemId, filename, checksum } of filesToFetch) {
+    const content = contents[filename];
+    if (!content) continue;
+
+    try {
+      const unpacked = unpackItem(filename, content, checksum);
+      items[itemId] = unpacked.content;
+      checksums[itemId] = checksum;
+    } catch (error) {
+      console.error(`Failed to unpack item ${itemId}:`, error);
+    }
+  }
+
+  return { items, checksums };
+}
+
 /**
  * Pull a per-item category from remote.
- * Only downloads items that don't exist locally (merge-based).
+ * Uses bulk fetch for efficiency (~2 API calls instead of N).
  */
 async function pullItemCategory(
   category: SyncCategory,
@@ -155,85 +199,52 @@ async function pullItemCategory(
   localChecksums: Record<string, string>,
   backend: StorageBackend
 ): Promise<ItemCategoryData> {
-  // Diff to find what needs download
   const diff = diffItems(localChecksums, info.items);
-
-  // Filter out tombstoned items - don't download items that are already deleted
   const toDownload = diff.toDownload.filter((id) => !(id in info.tombstones));
 
-  const items: Record<string, string> = {};
-  const checksums: Record<string, string> = {};
-
-  // Only download items that are remote-only and not tombstoned
-  for (const itemId of toDownload) {
-    const itemInfo = info.items[itemId];
-    if (!itemInfo) continue;
-
-    try {
-      const content = await downloadItem(itemInfo, backend);
-      if (content) {
-        items[itemId] = content;
-        checksums[itemId] = itemInfo.checksum;
-      }
-    } catch (error) {
-      // Log but don't fail entire pull for one item
-      console.error(`Failed to download item ${itemId}:`, error);
-    }
+  if (toDownload.length === 0) {
+    return { category, type: 'items', items: {}, checksums: {} };
   }
+
+  const filesToFetch = buildFetchList(toDownload, info.items);
+  const contents = await backend.getFiles(filesToFetch.map((f) => f.filename));
+  const { items, checksums } = processDownloads(filesToFetch, contents);
 
   return { category, type: 'items', items, checksums };
 }
 
 /**
- * Download a single item from storage.
- */
-async function downloadItem(itemInfo: ItemInfo, backend: StorageBackend): Promise<string | null> {
-  const content = await backend.getFile(itemInfo.filename);
-  if (!content) return null;
-
-  const unpacked = unpackItem(itemInfo.filename, content, itemInfo.checksum);
-  return unpacked.content;
-}
-
-/**
  * Download all chunks for a category.
+ * Uses bulk fetch for efficiency.
  */
 export async function downloadChunks(
   storageFiles: StorageFiles,
   filenames: string[],
   backend: StorageBackend
 ): Promise<PackedChunk[]> {
-  const chunks: PackedChunk[] = [];
+  // Collect filenames that need fetching (not in cache)
+  const toFetch: string[] = [];
+  for (const filename of filenames) {
+    if (filename && !storageFiles[filename]?.content) {
+      toFetch.push(filename);
+    }
+  }
 
+  // Bulk fetch missing files
+  const fetched = toFetch.length > 0 ? await backend.getFiles(toFetch) : {};
+
+  // Build chunks array
+  const chunks: PackedChunk[] = [];
   for (let i = 0; i < filenames.length; i++) {
     const filename = filenames[i];
     if (filename === undefined) continue;
 
-    const chunk = await downloadSingleChunk(storageFiles, filename, i, backend);
-    chunks.push(chunk);
+    // Use cached content or fetched content
+    const content = storageFiles[filename]?.content ?? fetched[filename];
+    if (!content) throw new Error(`Empty chunk file: ${filename}`);
+
+    chunks.push({ index: i, filename, content, size: content.length });
   }
 
   return chunks;
-}
-
-/**
- * Download a single chunk file.
- */
-async function downloadSingleChunk(
-  storageFiles: StorageFiles,
-  filename: string,
-  index: number,
-  backend: StorageBackend
-): Promise<PackedChunk> {
-  const file = storageFiles[filename];
-
-  // Try to use cached content first
-  let content = file?.content;
-
-  // If no content, fetch from backend
-  content ??= (await backend.getFile(filename)) ?? undefined;
-
-  if (!content) throw new Error(`Empty chunk file: ${filename}`);
-
-  return { index, filename, content, size: content.length };
 }
