@@ -18,7 +18,8 @@ npm version patch && git push && git push --tags
 
 1. `npm version` bumps `package.json` version, commits, and creates a `v*` tag
 2. `git push --tags` triggers the GitHub Actions publish workflow
-3. Workflow runs checks, builds, and publishes to npm with provenance
+3. Workflow authenticates via OIDC (no npm token needed)
+4. Publishes to npm with provenance attestation
 
 ## Verify
 
@@ -26,3 +27,9 @@ npm version patch && git push && git push --tags
 gh run list --limit 1
 npm view oc-sync version
 ```
+
+## Security
+
+- Uses OIDC trusted publishing (configured on npmjs.com)
+- No long-lived NPM_TOKEN secret required
+- Provenance links package to source commit
