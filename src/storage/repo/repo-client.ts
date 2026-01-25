@@ -78,8 +78,8 @@ export class RepoStorageBackend implements StorageBackend {
 
   public async exists(): Promise<boolean> {
     try {
-      const res = await this.fetch(`/contents/${SYNC_DIR}/manifest.json`);
-      return res.ok;
+      const res = await this.fetchAllowNotFound(`/contents/${SYNC_DIR}/manifest.json`);
+      return res?.ok ?? false;
     } catch (error) {
       // 404 means file doesn't exist, which is expected for new repos
       if (error instanceof RepoApiError && error.status === 404) {
@@ -99,8 +99,8 @@ export class RepoStorageBackend implements StorageBackend {
 
   public async getFile(path: string): Promise<string | null> {
     const fullPath = `${SYNC_DIR}/${path}`;
-    const res = await this.fetch(`/contents/${fullPath}`);
-    if (!res.ok) return null;
+    const res = await this.fetchAllowNotFound(`/contents/${fullPath}`);
+    if (!res?.ok) return null;
 
     const data = (await res.json()) as ContentFile;
 
@@ -148,8 +148,8 @@ export class RepoStorageBackend implements StorageBackend {
   }
 
   public async listFiles(): Promise<StorageFile[]> {
-    const res = await this.fetch(`/contents/${SYNC_DIR}`);
-    if (!res.ok) return [];
+    const res = await this.fetchAllowNotFound(`/contents/${SYNC_DIR}`);
+    if (!res?.ok) return [];
 
     const data = (await res.json()) as ContentFile[];
     return data.map((f) => ({
@@ -175,6 +175,21 @@ export class RepoStorageBackend implements StorageBackend {
     };
 
     return fetchWithRetry(url, opts, this.maxRetries, this.retryDelayMs);
+  }
+
+  /**
+   * Fetch that returns null for 404 instead of throwing.
+   * Use this for operations where "not found" is an expected valid result.
+   */
+  private async fetchAllowNotFound(path: string, options?: RequestInit): Promise<Response | null> {
+    try {
+      return await this.fetch(path, options);
+    } catch (error) {
+      if (error instanceof RepoApiError && error.status === 404) {
+        return null;
+      }
+      throw error;
+    }
   }
 
   private async createOrUpdateFile(path: string, content: string, message: string): Promise<void> {
@@ -223,14 +238,14 @@ export class RepoStorageBackend implements StorageBackend {
     }
 
     // Auto-detect: try main first, then master
-    const res = await this.fetch('/git/ref/heads/main');
-    if (res.ok) {
+    const res = await this.fetchAllowNotFound('/git/ref/heads/main');
+    if (res?.ok) {
       this.detectedBranch = 'main';
       return 'main';
     }
 
-    const masterRes = await this.fetch('/git/ref/heads/master');
-    if (masterRes.ok) {
+    const masterRes = await this.fetchAllowNotFound('/git/ref/heads/master');
+    if (masterRes?.ok) {
       this.detectedBranch = 'master';
       return 'master';
     }
@@ -240,8 +255,8 @@ export class RepoStorageBackend implements StorageBackend {
   }
 
   private async branchExists(branch: string): Promise<boolean> {
-    const res = await this.fetch(`/git/ref/heads/${branch}`);
-    return res.ok;
+    const res = await this.fetchAllowNotFound(`/git/ref/heads/${branch}`);
+    return res?.ok ?? false;
   }
 
   private async createBranch(branch: string): Promise<void> {
@@ -276,11 +291,11 @@ export class RepoStorageBackend implements StorageBackend {
 
   /** Detect default branch without creating - used as base for new branches */
   private async detectDefaultBranch(): Promise<'main' | 'master'> {
-    const res = await this.fetch('/git/ref/heads/main');
-    if (res.ok) return 'main';
+    const res = await this.fetchAllowNotFound('/git/ref/heads/main');
+    if (res?.ok) return 'main';
 
-    const masterRes = await this.fetch('/git/ref/heads/master');
-    if (masterRes.ok) return 'master';
+    const masterRes = await this.fetchAllowNotFound('/git/ref/heads/master');
+    if (masterRes?.ok) return 'master';
 
     return 'main';
   }
