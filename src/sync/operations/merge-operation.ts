@@ -6,7 +6,7 @@
 
 import { calculateChecksum } from '../packer.js';
 import { mergeJson, mergeJsonl } from '../merge/index.js';
-import { maybeDecrypt, parseEncryptedData } from './helpers.js';
+import { maybeDecrypt } from './helpers.js';
 import { downloadChunks } from './pull.js';
 import { unpackCategory } from '../packer.js';
 import type { StorageBackend } from '../../storage/index.js';
@@ -17,6 +17,7 @@ import type {
   Manifest,
   SyncCategory,
   LocalSyncState,
+  PassphraseOption,
 } from './types.js';
 
 export interface MergeAllResult {
@@ -28,7 +29,7 @@ interface MergeContext {
   remoteManifest: Manifest;
   storageFiles: StorageFiles;
   localState: LocalSyncState | null;
-  passphrase: string | undefined;
+  passphrase: PassphraseOption;
   machineId: string;
   backend: StorageBackend;
 }
@@ -95,18 +96,15 @@ async function downloadAndDecryptCategory(
   category: string,
   info: { files: string[]; checksum: string },
   storageFiles: StorageFiles,
-  passphrase: string | undefined,
+  passphrase: PassphraseOption,
   backend: StorageBackend
 ): Promise<string> {
   const chunks = await downloadChunks(storageFiles, info.files, backend);
   const data = unpackCategory(chunks, info.checksum);
 
-  if (category === 'credentials' && passphrase) {
-    const encrypted = parseEncryptedData(data);
-    return maybeDecrypt(category, JSON.stringify(encrypted), passphrase);
-  }
-
-  return data;
+  // Let maybeDecrypt handle credentials - it will detect if data is encrypted
+  // and use the appropriate key (current or old for key rotation)
+  return maybeDecrypt(category, data, passphrase);
 }
 
 /**

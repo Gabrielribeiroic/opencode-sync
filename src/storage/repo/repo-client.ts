@@ -20,6 +20,8 @@ export interface RepoClientConfig {
   token: string;
   owner: string;
   repo: string;
+  /** Branch to use for sync (auto-detected if not specified, created if missing) */
+  branch?: string;
   maxRetries?: number;
   retryDelayMs?: number;
 }
@@ -61,7 +63,8 @@ export class RepoStorageBackend implements StorageBackend {
   private readonly baseUrl: string;
   private readonly maxRetries: number;
   private readonly retryDelayMs: number;
-  private detectedBranch: 'main' | 'master' | null = null;
+  private readonly configuredBranch: string | undefined;
+  private detectedBranch: string | null = null;
 
   constructor(config: RepoClientConfig) {
     this.token = config.token;
@@ -70,6 +73,7 @@ export class RepoStorageBackend implements StorageBackend {
     this.baseUrl = `https://api.github.com/repos/${config.owner}/${config.repo}`;
     this.maxRetries = config.maxRetries ?? DEFAULT_MAX_RETRIES;
     this.retryDelayMs = config.retryDelayMs ?? DEFAULT_RETRY_DELAY_MS;
+    this.configuredBranch = config.branch;
   }
 
   public async exists(): Promise<boolean> {
@@ -94,7 +98,7 @@ export class RepoStorageBackend implements StorageBackend {
 
     // For files >1MB, GitHub returns empty content and provides download_url
     if (!data.content && data.size > 1000000) {
-      const branch = await this.getDefaultBranch();
+      const branch = await this.getBranch();
       const downloadUrl = `https://raw.githubusercontent.com/${this.owner}/${this.repo}/${branch}/${fullPath}`;
       const downloadRes = await fetchWithRetry(
         downloadUrl,
@@ -187,9 +191,20 @@ export class RepoStorageBackend implements StorageBackend {
     }
   }
 
-  private async getDefaultBranch(): Promise<'main' | 'master'> {
+  private async getBranch(): Promise<string> {
     if (this.detectedBranch) return this.detectedBranch;
 
+    // If branch is configured, use it (create if missing)
+    if (this.configuredBranch) {
+      const branchExists = await this.branchExists(this.configuredBranch);
+      if (!branchExists) {
+        await this.createBranch(this.configuredBranch);
+      }
+      this.detectedBranch = this.configuredBranch;
+      return this.configuredBranch;
+    }
+
+    // Auto-detect: try main first, then master
     const res = await this.fetch('/git/ref/heads/main');
     if (res.ok) {
       this.detectedBranch = 'main';
@@ -206,8 +221,54 @@ export class RepoStorageBackend implements StorageBackend {
     return 'main';
   }
 
+  private async branchExists(branch: string): Promise<boolean> {
+    const res = await this.fetch(`/git/ref/heads/${branch}`);
+    return res.ok;
+  }
+
+  private async createBranch(branch: string): Promise<void> {
+    // Get SHA from default branch (main or master)
+    const defaultBranch = await this.detectDefaultBranch();
+    const defaultRes = await this.fetch(`/git/ref/heads/${defaultBranch}`);
+    if (!defaultRes.ok) {
+      throw new RepoApiError(
+        `Cannot find default branch (${defaultBranch}) to create new branch from`,
+        404
+      );
+    }
+    const defaultRef = (await defaultRes.json()) as GitRef;
+    const baseSha = defaultRef.object.sha;
+
+    // Create new branch ref
+    const body = JSON.stringify({
+      ref: `refs/heads/${branch}`,
+      sha: baseSha,
+    });
+
+    const res = await this.fetch('/git/refs', { method: 'POST', body });
+    if (!res.ok) {
+      const errBody = (await res.json().catch(() => ({}))) as { message?: string };
+      throw new RepoApiError(
+        errBody.message ?? `Failed to create branch: ${branch}`,
+        res.status,
+        errBody
+      );
+    }
+  }
+
+  /** Detect default branch without creating - used as base for new branches */
+  private async detectDefaultBranch(): Promise<'main' | 'master'> {
+    const res = await this.fetch('/git/ref/heads/main');
+    if (res.ok) return 'main';
+
+    const masterRes = await this.fetch('/git/ref/heads/master');
+    if (masterRes.ok) return 'master';
+
+    return 'main';
+  }
+
   private async getHeadSha(): Promise<string> {
-    const branch = await this.getDefaultBranch();
+    const branch = await this.getBranch();
     const res = await this.fetch(`/git/ref/heads/${branch}`);
     if (!res.ok) {
       throw new RepoApiError(`Cannot find ${branch} branch`, 404);
@@ -314,7 +375,7 @@ export class RepoStorageBackend implements StorageBackend {
   private async updateRef(commitSha: string): Promise<void> {
     // force: false ensures proper CAS - GitHub will reject if HEAD moved
     const body = JSON.stringify({ sha: commitSha, force: false });
-    const branch = await this.getDefaultBranch();
+    const branch = await this.getBranch();
 
     const res = await this.fetch(`/git/refs/heads/${branch}`, { method: 'PATCH', body });
 

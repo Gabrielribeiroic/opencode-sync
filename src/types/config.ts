@@ -9,12 +9,16 @@ export interface SyncConfig {
   repoOwner?: string;
   /** Repository name for sync storage (default: 'opencode-sync') */
   repoName?: string;
+  /** Branch name for sync (auto-detected: main or master, created if specified and missing) */
+  branch?: string;
   /** Unique machine identifier (auto-generated) */
   machineId: string;
   /** Salt for encryption key derivation (base64) */
   keySalt?: string;
   /** Encrypted passphrase verification hash */
   passphraseHash?: string;
+  /** Previous encryption key for key rotation (used for decryption fallback) */
+  oldEncryptionKey?: string;
 
   // Sync behavior
   autoSyncOnStartup: boolean;

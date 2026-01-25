@@ -5,10 +5,17 @@
  */
 
 import { unpackCategory } from '../packer.js';
-import { maybeDecrypt, parseEncryptedData } from './helpers.js';
+import { maybeDecrypt } from './helpers.js';
 import type { StorageBackend } from '../../storage/index.js';
 import type { PackedChunk } from '../../types/index.js';
-import type { CategoryData, StorageFiles, PullResult, Manifest, SyncCategory } from './types.js';
+import type {
+  CategoryData,
+  StorageFiles,
+  PullResult,
+  Manifest,
+  SyncCategory,
+  PassphraseOption,
+} from './types.js';
 
 /**
  * Pull all categories from remote.
@@ -17,7 +24,7 @@ export async function pullCategories(
   manifest: Manifest,
   storageFiles: StorageFiles,
   enabledCategories: Record<SyncCategory, boolean>,
-  passphrase: string | undefined,
+  passphrase: PassphraseOption,
   backend: StorageBackend
 ): Promise<PullResult> {
   const pulledData: CategoryData[] = [];
@@ -41,18 +48,15 @@ async function pullSingleCategory(
   category: string,
   info: { files: string[]; checksum: string },
   storageFiles: StorageFiles,
-  passphrase: string | undefined,
+  passphrase: PassphraseOption,
   backend: StorageBackend
 ): Promise<string> {
   const chunks = await downloadChunks(storageFiles, info.files, backend);
   const data = unpackCategory(chunks, info.checksum);
 
-  if (category === 'credentials' && passphrase) {
-    const encrypted = parseEncryptedData(data);
-    return maybeDecrypt(category, JSON.stringify(encrypted), passphrase);
-  }
-
-  return data;
+  // Let maybeDecrypt handle credentials - it will detect if data is encrypted
+  // and use the appropriate key (current or old for key rotation)
+  return maybeDecrypt(category, data, passphrase);
 }
 
 /**

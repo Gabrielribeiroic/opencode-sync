@@ -22,10 +22,21 @@ export interface CategoryData {
 /** Storage files structure (backend-agnostic) */
 export type StorageFiles = Record<string, { content?: string; sha?: string }>;
 
+/** Options for encryption/decryption with key rotation support */
+export interface CryptoOptions {
+  /** Current encryption key */
+  passphrase?: string;
+  /** Previous encryption key for decryption fallback during key rotation */
+  oldPassphrase?: string;
+}
+
+/** Passphrase can be a string (legacy) or CryptoOptions (with key rotation support) */
+export type PassphraseOption = string | CryptoOptions | undefined;
+
 export interface OperationContext {
   config: SyncConfig;
   localState: LocalSyncState | null;
-  passphrase: string | undefined;
+  passphrase: PassphraseOption;
 }
 
 export interface PushContext extends OperationContext {

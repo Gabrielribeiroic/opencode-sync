@@ -150,6 +150,24 @@ After first run, the plugin creates `~/.config/opencode/opencode-sync.json`:
 }
 ```
 
+## Encryption Key Rotation
+
+To rotate encryption keys without losing access to credentials:
+
+1. Add both keys to config on ALL machines:
+```json
+{
+  "encryptionKey": "new-key-here",
+  "oldEncryptionKey": "old-key-here"
+}
+```
+
+2. Restart OpenCode on each machine - it will:
+   - Decrypt using `oldEncryptionKey` (fallback)
+   - Re-encrypt using `encryptionKey` on next push
+
+3. After all machines have synced, remove `oldEncryptionKey`
+
 ## Troubleshooting
 
 ### Plugin not loading

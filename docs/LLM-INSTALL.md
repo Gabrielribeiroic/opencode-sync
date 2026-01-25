@@ -41,18 +41,35 @@ Guide the user step by step:
 8. IMPORTANT: Tell user to copy the token immediately (starts with "github_pat_")
 9. Ask user: "Please paste your token here" - Save this as TOKEN
 
-### Step 4: Generate Encryption Key
-Tell the user:
-"I'll generate a secure encryption key for you. This encrypts your data before uploading to GitHub."
+### Step 4: Encryption Key (Optional)
+Ask the user:
+"Do you want to encrypt your credentials (auth tokens) before syncing? This adds extra security but requires the same key on all machines."
 
-Generate a random 32-character alphanumeric string for the user, or ask them to provide their own (minimum 16 characters).
-Save this as ENCRYPTION_KEY.
+If YES:
+- Generate a random 32-character alphanumeric string, or let user provide their own (minimum 16 characters)
+- Save this as ENCRYPTION_KEY
+- IMPORTANT: Tell user to save this key securely. If lost, encrypted credentials cannot be recovered.
+- WARNING: All machines must use the same key. Adding encryption later will break sync on machines without the key.
 
-IMPORTANT: Tell user to save this key securely. If lost, synced data cannot be decrypted.
+If NO:
+- Skip this step. Credentials will sync in plain text (still protected by GitHub's private repo authentication).
 
 ### Step 5: Create Configuration
 Create or update the OpenCode config file with these values:
 
+Without encryption:
+{
+  "plugins": {
+    "oc-sync": {
+      "token": "<TOKEN from Step 3>",
+      "owner": "<OWNER from Step 2>",
+      "repo": "<REPO from Step 2>",
+      "branch": "main"
+    }
+  }
+}
+
+With encryption:
 {
   "plugins": {
     "oc-sync": {
@@ -79,13 +96,38 @@ If user reports errors:
 - "401 Unauthorized": Token is invalid or expired. Generate a new one.
 - "403 Forbidden": Token lacks required permissions. Recreate with Contents read/write.
 - "Encryption error": Key is less than 16 characters or contains invalid characters.
+- "Decryption failed": Wrong encryption key or data was synced with a different key.
+
+### Key Rotation (Advanced)
+If user needs to change their encryption key:
+
+1. On ALL machines, update config to include BOTH keys:
+{
+  "plugins": {
+    "oc-sync": {
+      "token": "...",
+      "owner": "...",
+      "repo": "...",
+      "encryptionKey": "<NEW_KEY>",
+      "oldEncryptionKey": "<OLD_KEY>"
+    }
+  }
+}
+
+2. Restart OpenCode on each machine. The plugin will:
+   - Decrypt using old key (fallback)
+   - Re-encrypt using new key on push
+
+3. After ALL machines have synced with the new key, remove oldEncryptionKey from config.
+
+IMPORTANT: Do NOT remove oldEncryptionKey until all machines have synced at least once with the new configuration.
 
 ### Summary
 After setup, confirm with user:
 - GitHub username: [OWNER]
 - Repository: [REPO] (private)
 - Token: configured (never display full token)
-- Encryption: enabled with [length]-character key
+- Encryption: enabled/disabled
 - Status: Ready to sync
 ```
 

@@ -8,7 +8,14 @@ import { packCategory, calculateChecksum } from '../packer.js';
 import { incrementClock } from '../vector-clock.js';
 import { maybeEncrypt } from './helpers.js';
 import { MAX_SYNC_HISTORY, type SyncHistoryEntry } from '../../types/index.js';
-import type { CategoryData, PushContext, Manifest, LocalSyncState, SyncCategory } from './types.js';
+import type {
+  CategoryData,
+  PushContext,
+  Manifest,
+  LocalSyncState,
+  SyncCategory,
+  PassphraseOption,
+} from './types.js';
 
 /**
  * Prepare all data for pushing to remote.
@@ -18,7 +25,7 @@ export function preparePushData(
   localData: CategoryData[],
   config: { machineId: string; sync: Record<SyncCategory, boolean> },
   localState: LocalSyncState | null,
-  passphrase: string | undefined,
+  passphrase: PassphraseOption,
   existingFiles?: string[]
 ): {
   files: Record<string, { content: string | null }>;

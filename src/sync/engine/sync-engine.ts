@@ -35,12 +35,22 @@ export class SyncEngine {
   private readonly config: SyncEngineOptions['config'];
   private localState: LocalSyncState | null;
   private readonly passphrase: string | undefined;
+  private readonly oldPassphrase: string | undefined;
 
   constructor(options: SyncEngineOptions) {
     this.backend = options.backend;
     this.config = options.config;
     this.localState = options.localState;
     this.passphrase = options.passphrase;
+    this.oldPassphrase = options.oldPassphrase;
+  }
+
+  /** Get crypto options for encryption/decryption with key rotation support */
+  private getCryptoOptions(): { passphrase?: string; oldPassphrase?: string } {
+    const result: { passphrase?: string; oldPassphrase?: string } = {};
+    if (this.passphrase) result.passphrase = this.passphrase;
+    if (this.oldPassphrase) result.oldPassphrase = this.oldPassphrase;
+    return result;
   }
 
   public async sync(localData: CategoryData[]): Promise<SyncResult> {
@@ -144,7 +154,7 @@ export class SyncEngine {
       localData,
       this.config,
       this.localState,
-      this.passphrase,
+      this.getCryptoOptions(),
       existingFilenames
     );
     const storageFiles: Record<string, string | null> = {};
@@ -169,7 +179,7 @@ export class SyncEngine {
       manifest,
       storageFiles,
       this.config.sync,
-      this.passphrase,
+      this.getCryptoOptions(),
       this.backend
     );
     this.localState = buildLocalState(
@@ -191,7 +201,7 @@ export class SyncEngine {
       remoteManifest,
       storageFiles,
       localState: this.localState,
-      passphrase: this.passphrase,
+      passphrase: this.getCryptoOptions(),
       machineId: this.config.machineId,
       backend: this.backend,
     });

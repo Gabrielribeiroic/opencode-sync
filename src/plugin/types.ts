@@ -14,6 +14,8 @@ export interface PluginState {
   engine: SyncEngine | null;
   watcher: FileWatcher | null;
   passphrase: string | null;
+  /** Previous encryption key for key rotation */
+  oldPassphrase: string | null;
   isInitialized: boolean;
 }
 
@@ -24,6 +26,7 @@ export function createInitialState(): PluginState {
     engine: null,
     watcher: null,
     passphrase: null,
+    oldPassphrase: null,
     isInitialized: false,
   };
 }
