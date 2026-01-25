@@ -14,6 +14,7 @@ import {
   deleteTombstonedItems,
 } from '../data/index.js';
 import { getPluginState } from './state-manager.js';
+import { syncLog } from '../sync/engine/logger.js';
 
 type LogLevel = 'error' | 'info' | 'debug' | 'warn';
 
@@ -62,14 +63,20 @@ async function handleSyncSuccess(
 
   // Write pulled data to local filesystem
   if (result.action === 'pulled' || result.action === 'merged') {
+    syncLog(
+      `[WRITE] Action: ${result.action}, pulledData: ${result.pulledData ? 'present' : 'missing'}`
+    );
     if (result.pulledData) {
       const data = result.pulledData as CategoryData[];
-      console.warn(`[SYNC-DEBUG] Writing ${String(data.length)} categories to disk`);
+      syncLog(`[WRITE] Writing ${String(data.length)} categories to disk`);
       await writeLocalData(pathConfig, data);
+      syncLog(`[WRITE] Finished writing to disk`);
     }
     if (result.tombstonedItems) {
       await deleteTombstonedItems(pathConfig, result.tombstonedItems);
     }
+  } else {
+    syncLog(`[WRITE] Skipping write - action: ${result.action}`);
   }
 
   if (newState) {

@@ -14,10 +14,19 @@ import {
   updateConfig,
   initializeEngine,
 } from './state-manager.js';
-import { getTokenSource, loadLocalData, saveLocalState } from '../data/index.js';
+import {
+  getTokenSource,
+  loadLocalData,
+  saveLocalState,
+  writeLocalData,
+  deleteTombstonedItems,
+} from '../data/index.js';
 import { RepoStorageBackend } from '../storage/index.js';
 import { FileWatcher } from '../sync/watcher/index.js';
 import type { PluginState } from './types.js';
+import type { CategoryData } from '../sync/operations/types.js';
+import type { SyncResult } from '../types/sync.js';
+import { syncLog } from '../sync/engine/logger.js';
 
 /** Default repo name for sync storage */
 const DEFAULT_REPO_NAME = '.opencode-sync';
@@ -187,6 +196,24 @@ async function ensureStorageExists(pathConfig: PathConfig): Promise<void> {
   }
 }
 
+/** Write pulled data to disk after a successful pull/merge */
+async function writePulledData(pathConfig: PathConfig, result: SyncResult): Promise<void> {
+  if (result.action !== 'pulled' && result.action !== 'merged') {
+    return;
+  }
+
+  if (result.pulledData) {
+    const data = result.pulledData as CategoryData[];
+    syncLog(`[WRITE] Writing ${String(data.length)} categories to disk`);
+    await writeLocalData(pathConfig, data);
+    syncLog(`[WRITE] Finished writing to disk`);
+  }
+
+  if (result.tombstonedItems) {
+    await deleteTombstonedItems(pathConfig, result.tombstonedItems);
+  }
+}
+
 /** Persist engine's local state to disk after successful sync */
 async function persistLocalState(pathConfig: PathConfig): Promise<void> {
   const state = getPluginState();
@@ -227,6 +254,8 @@ function performInitialSync(pathConfig: PathConfig): void {
       const dur = Date.now() - syncStart;
 
       if (result.success && result.action !== 'error') {
+        // Write pulled data to disk BEFORE persisting state
+        await writePulledData(pathConfig, result);
         await persistLocalState(pathConfig);
         log(`Initial sync complete in ${String(dur)}ms: ${result.message}`);
       } else {
@@ -301,8 +330,9 @@ function startIntervalSync(pathConfig: PathConfig): void {
       try {
         const { categories } = await loadLocalData(pathConfig, config.sync);
         const result = await engine.sync(categories);
-        // Persist state after successful sync
+        // Write pulled data and persist state after successful sync
         if (result.success) {
+          await writePulledData(pathConfig, result);
           await persistLocalState(pathConfig);
         }
         // Log interval sync results (both success and no-change)
