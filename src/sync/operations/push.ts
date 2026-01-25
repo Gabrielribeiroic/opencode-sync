@@ -171,9 +171,10 @@ function packItemCategoryData(
   const newItems = removeItemsById(processed, tombResult.itemsToRemove);
 
   // Always use sharding for item categories
-  writeShardedCategory(category, newItems, tombResult.tombstones, ctx);
+  const shardFile = writeShardedCategory(category, newItems, tombResult.tombstones, ctx);
 
-  return filenames;
+  // Return both item filenames AND the shard file to prevent orphan deletion
+  return [...filenames, shardFile];
 }
 
 /**

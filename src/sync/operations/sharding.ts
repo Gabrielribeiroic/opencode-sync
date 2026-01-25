@@ -16,13 +16,14 @@ import type { PushContext, SyncCategory } from './types.js';
 
 /**
  * Write a sharded category (items stored in separate shard file).
+ * Returns the shard filename for tracking.
  */
 export function writeShardedCategory(
   category: SyncCategory,
   items: Record<string, ItemInfo>,
   tombstones: Record<string, Tombstone>,
   ctx: PushContext
-): void {
+): string {
   const shardFile = getShardFilename(category);
 
   // Create shard content
@@ -51,4 +52,6 @@ export function writeShardedCategory(
     lastModifiedBy: ctx.machineId,
     vectorClock: { [ctx.machineId]: ctx.newClock[ctx.machineId] ?? 1 },
   } satisfies ShardedCategoryRef;
+
+  return shardFile;
 }
