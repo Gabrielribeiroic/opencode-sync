@@ -56,7 +56,7 @@ export const DEFAULT_CONFIG: Omit<SyncConfig, 'token' | 'machineId'> = {
     state: true,
     credentials: true,
     sessions: true,
-    messages: false, // Disabled by default - can be very large (>8MB)
+    messages: true,
     projects: true,
     todos: true,
   },
