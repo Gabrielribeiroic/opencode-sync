@@ -37,7 +37,7 @@
     "multi-machine"
   ],
   "author": "Ercin Dedeoglu",
-  "license": "MIT",
+  "license": "AGPL-3.0",
   "dependencies": {
     "@opencode-ai/plugin": "latest",
     "pako": "^2.1.0"

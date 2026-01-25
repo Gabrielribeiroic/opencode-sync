@@ -68,100 +68,16 @@ Configure in `opencode-sync.json`:
 
 ## Configuration
 
-### Quick Start
-
 1. Create a [GitHub Personal Access Token](https://github.com/settings/tokens) with `repo` scope
-2. Set the environment variable:
+2. Set environment variable:
 
 ```bash
 export GITHUB_TOKEN=ghp_your_token_here
 ```
 
-3. Start OpenCode - the plugin will automatically create a private repo for sync storage
+3. Start OpenCode - the plugin automatically creates a private repo for sync storage
 
-Add to your shell profile (`~/.bashrc`, `~/.zshrc`) for persistence.
-
-### What Happens on First Run
-
-When the plugin starts with a valid token but no storage configured:
-1. Detects your GitHub username automatically
-2. Creates a new **private** repository called `.opencode-sync`
-3. Initializes the `.opencode-sync/` directory with a manifest
-4. Saves the repo info to `~/.config/opencode/opencode-sync.json`
-5. Future runs will use the same repository
-
-### Alternative: Config File
-
-Instead of environment variable, create `~/.config/opencode/opencode-sync.json`:
-
-```json
-{
-  "token": "ghp_your_token_here"
-}
-```
-
-### Token Priority
-
-Config file token takes precedence over environment variable.
-
-### Verifying Configuration
-
-After starting OpenCode, check the logs for:
-```
-[opencode-sync] Token loaded from: environment variable
-[opencode-sync] Setting up sync storage...
-[opencode-sync] Creating sync repository...
-[opencode-sync] Linked to repo: username/.opencode-sync
-[opencode-sync] Repo saved to config
-[opencode-sync] Plugin ready
-```
-
-On subsequent runs:
-```
-[opencode-sync] Token loaded from: environment variable
-[opencode-sync] Linked to repo: username/.opencode-sync
-[opencode-sync] Plugin ready
-```
-
-### Full Configuration Options
-
-```json
-{
-  "token": "ghp_your_token_here",
-  "repoOwner": "auto-detected-username",
-  "repoName": ".opencode-sync",
-  "autoSyncOnStartup": true,
-  "continuousSync": true,
-  "syncIntervalMinutes": 5,
-  "fileWatcherDebounceMs": 5000,
-  "maxDebounceMs": 30000,
-  "sync": {
-    "config": true,
-    "state": true,
-    "credentials": true,
-    "sessions": true,
-    "messages": true,
-    "projects": true,
-    "todos": true
-  },
-  "conflictStrategy": "auto-merge"
-}
-```
-
-**Note:** All categories are enabled by default. Disable `messages` if you have very large conversation history (8MB+) and want to reduce sync size.
-
-## Sync Timing
-
-The plugin uses **activity-aware batching** to prevent excessive syncs during heavy IO:
-
-| Trigger | Default | Description |
-|---------|---------|-------------|
-| **Startup** | Enabled | Immediately when OpenCode starts |
-| **File Changes** | 5s debounce | Wait for inactivity before syncing |
-| **Max Delay** | 30s cap | Force sync even during heavy activity |
-| **Interval** | 5 minutes | Periodic sync regardless of changes |
-
-During heavy activity, syncs are batched and fire at most every 30 seconds.
+See [Configuration Guide](docs/CONFIG.md) for all options.
 
 ## Security
 
@@ -175,6 +91,7 @@ During heavy activity, syncs are batched and fire at most every 30 seconds.
 
 | Guide | Description |
 |-------|-------------|
+| [Configuration](docs/CONFIG.md) | All configuration options |
 | [Architecture](docs/ARCHITECTURE.md) | Code structure and modules |
 | [Sync Architecture](docs/SYNC.md) | Sync triggers, batching, data categories |
 | [Sync Paths](docs/SYNC-PATHS.md) | OpenCode file locations by platform |
@@ -182,59 +99,6 @@ During heavy activity, syncs are batched and fire at most every 30 seconds.
 | [Publishing](docs/PUBLISH.md) | npm release process |
 | [LLM Installation](docs/LLM-INSTALL.md) | Instructions for AI coding agents |
 
-## Development
-
-```bash
-# Install dependencies
-npm install
-
-# Build
-npm run build
-
-# Watch mode
-npm run dev
-
-# Run all checks (typecheck + lint + format)
-npm run check
-
-# Lint only
-npm run lint
-
-# Lint and fix
-npm run lint:fix
-
-# Type check only
-npm run typecheck
-
-# Format code
-npm run format
-```
-
-## Code Quality
-
-This project uses strict linting rules optimized for LLM readability and maintainability:
-
-### File & Function Limits
-- Max **200 lines** per file (excluding blanks/comments)
-- Max **60 lines** per function
-- Max **4 levels** of nesting
-- Max **5 parameters** per function
-- Max **20 statements** per function
-- Cyclomatic complexity limit of **15**
-
-### TypeScript Strictness
-- Explicit return types required
-- Explicit member accessibility required
-- No `any` types allowed
-- No floating promises
-- Consistent type imports/exports
-
-### Pre-commit Hooks
-Husky + lint-staged runs automatically on commit:
-1. Full TypeScript type checking
-2. ESLint with auto-fix on staged files
-3. Prettier formatting on staged files
-
 ## License
 
-MIT
+AGPL-3.0
