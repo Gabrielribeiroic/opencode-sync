@@ -97,7 +97,16 @@ export async function fetchRemoteItemsNotLocal(
   if (filesToFetch.length === 0) return [];
 
   syncLog(`[PUSH] Fetching ${String(filesToFetch.length)} remote items to write locally`);
-  const contents = await backend.getFiles(filesToFetch.map((f) => f.filename));
+
+  const filenames = filesToFetch.map((f) => f.filename);
+  const contents = await backend.getFiles(filenames);
+
+  // Count how many files we actually got (some may be missing from repo)
+  const gotCount = Object.values(contents).filter((c) => c !== null).length;
+  if (gotCount < filenames.length) {
+    syncLog(`[PUSH] Note: ${String(filenames.length - gotCount)} remote items not found in repo`);
+  }
+
   const categoryItems = processDownloadedContent(filesToFetch, contents);
 
   // Convert to CategoryData[]

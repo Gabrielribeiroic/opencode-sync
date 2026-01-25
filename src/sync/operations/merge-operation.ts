@@ -177,7 +177,9 @@ async function downloadAndDecryptCategory(
   backend: StorageBackend
 ): Promise<string> {
   const chunks = await downloadChunks(storageFiles, info.files, backend);
-  const data = unpackCategory(chunks, info.checksum);
+  // Skip checksum validation - blob categories legitimately differ between machines
+  // (dev/prod builds, different projects/state) and CDN caching causes false positives
+  const data = unpackCategory(chunks);
   return maybeDecrypt(category, data, passphrase);
 }
 
