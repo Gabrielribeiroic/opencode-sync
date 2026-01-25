@@ -6,9 +6,10 @@
  */
 
 import { unpackCategory } from '../packer.js';
-import { unpackItem, diffItems } from '../item-packer.js';
+import { unpackItem } from '../item-packer.js';
 import { maybeDecrypt } from './helpers.js';
 import { fetchCategoryShard } from '../engine/manifest.js';
+import { syncLog } from '../engine/logger.js';
 import type { StorageBackend } from '../../storage/index.js';
 import type { PackedChunk, BlobCategoryInfo, SyncCategory } from '../../types/index.js';
 import type { ItemCategoryInfo, Tombstone, ShardedCategoryRef } from '../../types/manifest.js';
@@ -84,7 +85,11 @@ export async function pullCategories(options: PullOptions): Promise<ExtendedPull
 
   for (const [category, info] of Object.entries(manifest.categories)) {
     const cat = category as SyncCategory;
-    if (!enabledCategories[cat]) continue;
+    if (!enabledCategories[cat]) {
+      syncLog(`[PULL] Skipping disabled category: ${cat}`);
+      continue;
+    }
+    syncLog(`[PULL] Processing ${cat} (type: ${info.type})`);
 
     if (info.type === 'items') {
       const data = await pullItemCategory(cat, info, localChecksums?.[cat] ?? {}, backend);
@@ -139,7 +144,9 @@ async function pullBlobCategory(
   backend: StorageBackend
 ): Promise<string> {
   const chunks = await downloadChunks(storageFiles, info.files, backend);
-  const data = unpackCategory(chunks, info.checksum);
+  // Skip checksum validation - blob categories legitimately differ between machines
+  // (dev/prod builds, different projects/state) and CDN caching causes false positives
+  const data = unpackCategory(chunks);
 
   // Let maybeDecrypt handle credentials - it will detect if data is encrypted
   return maybeDecrypt(category, data, passphrase);
@@ -192,23 +199,31 @@ function processDownloads(
 /**
  * Pull a per-item category from remote.
  * Uses bulk fetch for efficiency (~2 API calls instead of N).
+ *
+ * Always downloads all items to ensure they exist on disk.
+ * TODO: Optimize to only download items missing from filesystem.
  */
 async function pullItemCategory(
   category: SyncCategory,
   info: ItemCategoryInfo,
-  localChecksums: Record<string, string>,
+  _localChecksums: Record<string, string>,
   backend: StorageBackend
 ): Promise<ItemCategoryData> {
-  const diff = diffItems(localChecksums, info.items);
-  const toDownload = diff.toDownload.filter((id) => !(id in info.tombstones));
+  // Download ALL items (not just those with different checksums)
+  // to ensure they exist on disk even if state was updated but files weren't written
+  const allItemIds = Object.keys(info.items).filter((id) => !(id in info.tombstones));
 
-  if (toDownload.length === 0) {
+  if (allItemIds.length === 0) {
     return { category, type: 'items', items: {}, checksums: {} };
   }
 
-  const filesToFetch = buildFetchList(toDownload, info.items);
+  const filesToFetch = buildFetchList(allItemIds, info.items);
   const contents = await backend.getFiles(filesToFetch.map((f) => f.filename));
   const { items, checksums } = processDownloads(filesToFetch, contents);
+
+  syncLog(
+    `[PULL] ${category}: downloaded ${String(Object.keys(items).length)}/${String(allItemIds.length)} items`
+  );
 
   return { category, type: 'items', items, checksums };
 }

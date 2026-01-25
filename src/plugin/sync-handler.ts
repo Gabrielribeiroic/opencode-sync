@@ -5,7 +5,14 @@
  */
 
 import type { PathConfig } from '../types/paths.js';
-import { loadLocalData, saveLocalState } from '../data/index.js';
+import type { SyncResult } from '../types/index.js';
+import type { CategoryData } from '../sync/operations/types.js';
+import {
+  loadLocalData,
+  saveLocalState,
+  writeLocalData,
+  deleteTombstonedItems,
+} from '../data/index.js';
 import { getPluginState } from './state-manager.js';
 
 type LogLevel = 'error' | 'info' | 'debug' | 'warn';
@@ -48,10 +55,22 @@ export async function performSync(pathConfig: PathConfig, client: LogClient): Pr
 async function handleSyncSuccess(
   pathConfig: PathConfig,
   client: LogClient,
-  result: { action: string; message: string }
+  result: SyncResult
 ): Promise<void> {
   const state = getPluginState();
   const newState = state.engine?.getLocalState();
+
+  // Write pulled data to local filesystem
+  if (result.action === 'pulled' || result.action === 'merged') {
+    if (result.pulledData) {
+      const data = result.pulledData as CategoryData[];
+      console.warn(`[SYNC-DEBUG] Writing ${String(data.length)} categories to disk`);
+      await writeLocalData(pathConfig, data);
+    }
+    if (result.tombstonedItems) {
+      await deleteTombstonedItems(pathConfig, result.tombstonedItems);
+    }
+  }
 
   if (newState) {
     await saveLocalState(pathConfig, newState);

@@ -213,16 +213,21 @@ export class RepoStorageBackend implements StorageBackend {
   /**
    * Fetch files via raw.githubusercontent.com (no API rate limits).
    * All fetches run in parallel - raw content endpoint has no rate limiting.
+   * Adds cache-bust parameter to bypass CDN caching issues.
    */
   private async fetchFilesViaRaw(
     paths: string[]
   ): Promise<{ path: string; content: string | null }[]> {
     const branch = await this.getBranch();
     const baseUrl = `https://raw.githubusercontent.com/${this.owner}/${this.repo}/${branch}`;
+    // Add cache-bust to avoid stale CDN responses after recent pushes
+    const cacheBust = Date.now();
 
     const results = await Promise.all(
       paths.map(async (path) => {
-        const content = await this.fetchRawFile(`${baseUrl}/${SYNC_DIR}/${path}`);
+        const content = await this.fetchRawFile(
+          `${baseUrl}/${SYNC_DIR}/${path}?cb=${String(cacheBust)}`
+        );
         return { path, content };
       })
     );
