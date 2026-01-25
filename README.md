@@ -183,8 +183,6 @@ The plugin uses **activity-aware batching** to prevent excessive syncs during he
 
 During heavy activity, syncs are batched and fire at most every 30 seconds.
 
-See [docs/SYNC.md](docs/SYNC.md) for detailed architecture documentation.
-
 ## Security
 
 - Credentials are encrypted with AES-256-GCM before upload
@@ -193,60 +191,16 @@ See [docs/SYNC.md](docs/SYNC.md) for detailed architecture documentation.
 - Token is stored locally, never uploaded
 - Atomic commits with compare-and-swap prevent race conditions
 
-## Architecture
+## Documentation
 
-```
-src/
-├── index.ts              # Main entry point (re-exports from plugin)
-├── plugin/               # Plugin module
-│   ├── plugin.ts         # Plugin definition and hooks
-│   ├── state-manager.ts  # Plugin state management
-│   ├── sync-handler.ts   # Sync operation handler
-│   └── types.ts          # Plugin types
-├── storage/              # Storage backend abstraction
-│   ├── interface.ts      # StorageBackend interface
-│   ├── repo/             # GitHub Repo backend
-│   │   ├── repo-client.ts  # API client
-│   │   ├── fetch.ts        # Fetch with retry logic
-│   │   └── errors.ts       # API error types
-│   └── index.ts          # Exports
-├── sync/
-│   ├── engine/           # Sync engine module
-│   │   ├── sync-engine.ts  # Core orchestration
-│   │   ├── state.ts        # Local state management
-│   │   ├── manifest.ts     # Manifest operations
-│   │   ├── result.ts       # Result builders
-│   │   └── errors.ts       # Sync error types
-│   ├── operations/       # Push/pull/merge operations
-│   │   ├── push.ts         # Push to remote
-│   │   ├── pull.ts         # Pull from remote
-│   │   ├── merge-operation.ts  # Merge conflicts
-│   │   └── helpers.ts      # Encryption helpers
-│   ├── merge/            # Three-way merge module
-│   │   ├── json-merge.ts   # JSON merge algorithm
-│   │   ├── jsonl-merge.ts  # JSONL merge algorithm
-│   │   └── utils.ts        # Merge utilities
-│   ├── watcher/          # File watcher module
-│   │   ├── file-watcher.ts     # Main watcher class
-│   │   ├── directory-watcher.ts # Directory watching
-│   │   └── ignore-patterns.ts  # File ignore rules
-│   ├── vector-clock.ts   # Vector clock operations
-│   └── packer.ts         # Compression/chunking
-├── crypto/
-│   └── encrypt.ts        # AES-256-GCM encryption
-├── data/                 # Data loading module
-│   ├── category-loader.ts  # Load by category
-│   ├── directory-loader.ts # Directory traversal
-│   ├── parsers.ts          # JSON/JSONL parsing
-│   ├── writer.ts           # Write local data
-│   └── state.ts            # Config/state persistence
-└── types/                # TypeScript definitions
-    ├── config.ts           # Config types
-    ├── manifest.ts         # Manifest types
-    ├── sync.ts             # Sync result types
-    ├── vector-clock.ts     # Vector clock types
-    └── paths.ts            # Path configuration
-```
+| Guide | Description |
+|-------|-------------|
+| [Architecture](docs/ARCHITECTURE.md) | Code structure and modules |
+| [Sync Architecture](docs/SYNC.md) | Sync triggers, batching, data categories |
+| [Sync Paths](docs/SYNC-PATHS.md) | OpenCode file locations by platform |
+| [Development Setup](docs/DEV-SETUP.md) | Local development environment |
+| [Publishing](docs/PUBLISH.md) | npm release process |
+| [LLM Installation](docs/LLM-INSTALL.md) | Instructions for AI coding agents |
 
 ## Development
 
