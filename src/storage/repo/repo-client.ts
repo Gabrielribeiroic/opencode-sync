@@ -77,8 +77,16 @@ export class RepoStorageBackend implements StorageBackend {
   }
 
   public async exists(): Promise<boolean> {
-    const res = await this.fetch(`/contents/${SYNC_DIR}/manifest.json`);
-    return res.ok;
+    try {
+      const res = await this.fetch(`/contents/${SYNC_DIR}/manifest.json`);
+      return res.ok;
+    } catch (error) {
+      // 404 means file doesn't exist, which is expected for new repos
+      if (error instanceof RepoApiError && error.status === 404) {
+        return false;
+      }
+      throw error;
+    }
   }
 
   public async initialize(manifest: string): Promise<void> {
@@ -170,9 +178,19 @@ export class RepoStorageBackend implements StorageBackend {
   }
 
   private async createOrUpdateFile(path: string, content: string, message: string): Promise<void> {
-    // Get current file SHA if exists
-    const existing = await this.fetch(`/contents/${path}`);
-    const sha = existing.ok ? ((await existing.json()) as ContentFile).sha : undefined;
+    // Get current file SHA if exists (404 means file doesn't exist yet)
+    let sha: string | undefined;
+    try {
+      const existing = await this.fetch(`/contents/${path}`);
+      if (existing.ok) {
+        sha = ((await existing.json()) as ContentFile).sha;
+      }
+    } catch (error) {
+      // 404 is expected for new files
+      if (!(error instanceof RepoApiError && error.status === 404)) {
+        throw error;
+      }
+    }
 
     const body = JSON.stringify({
       message,

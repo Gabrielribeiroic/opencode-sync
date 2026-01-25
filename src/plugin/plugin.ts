@@ -179,7 +179,6 @@ async function ensureStorageExists(pathConfig: PathConfig): Promise<void> {
 
     log(`Linked to repo: ${owner}/${repoName}`);
     await updateConfig(pathConfig, { repoOwner: owner, repoName });
-    log('Repo saved to config');
     initializeEngine();
   } catch (error) {
     const errMsg = error instanceof Error ? error.message : String(error);
