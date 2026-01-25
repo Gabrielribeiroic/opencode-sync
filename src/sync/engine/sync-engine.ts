@@ -1,8 +1,6 @@
 import type { StorageBackend } from '../../storage/index.js';
 import { RepoConflictError } from '../../storage/index.js';
 import { syncLog } from './logger.js';
-import { pullCategories } from '../operations/pull.js';
-import { mergeAllCategories } from '../operations/merge-operation.js';
 import {
   createEmptyManifest,
   type Manifest,
@@ -11,32 +9,18 @@ import {
 } from '../../types/index.js';
 import type { CategoryData } from '../operations/types.js';
 import type { SyncEngineOptions } from './types.js';
-import { MANIFEST_FILENAME } from './types.js';
 import { fetchManifest } from './manifest.js';
-import {
-  buildLocalState,
-  isLockedByOther,
-  getStorageFilesMap,
-  mergeDataForState,
-} from './state.js';
-import {
-  buildPushResult,
-  buildPullResult,
-  buildConflictResult,
-  buildErrorResult,
-  buildSkippedResult,
-  handleSyncError,
-} from './result.js';
+import { isLockedByOther } from './state.js';
+import { buildErrorResult, buildSkippedResult, handleSyncError } from './result.js';
 import { checkMaxRetries, calculateBackoff, sleep } from './retry.js';
 import { acquireLock, releaseLock, getLockHolder } from '../local-lock.js';
-import {
-  buildPullOptions,
-  executePush,
-  toStorageFiles,
-  buildCryptoOptions,
-  extractTombstoneIds,
-} from './helpers.js';
 import { determineAction, executeRoute } from './routing.js';
+import {
+  executePushOperation,
+  executePullOperation,
+  executeConflictOperation,
+  type PushContext,
+} from './operations.js';
 
 export { type CategoryData };
 
@@ -109,8 +93,20 @@ export class SyncEngine {
   private hasStorageConfigured(): boolean {
     return Boolean(this.config.repoOwner && this.config.repoName);
   }
+
   private getStorageId(): string {
     return `${this.config.repoOwner ?? ''}/${this.config.repoName ?? ''}`;
+  }
+
+  private getOperationContext(): PushContext {
+    return {
+      backend: this.backend,
+      config: this.config,
+      passphrase: this.passphrase,
+      oldPassphrase: this.oldPassphrase,
+      getStorageId: () => this.getStorageId(),
+      localState: this.localState,
+    };
   }
 
   private async syncWithRetry(data: CategoryData[], retry: number): Promise<SyncResult> {
@@ -149,44 +145,18 @@ export class SyncEngine {
   }
 
   private async performPush(data: CategoryData[], remote?: Manifest): Promise<SyncResult> {
-    const existing = (await this.backend.listFiles()).map((f) => f.filename);
-    const opts = {
-      localData: data,
-      config: this.config,
-      localState: this.localState,
-      passphrase: buildCryptoOptions(this.passphrase, this.oldPassphrase),
-      existingFiles: existing,
-    };
-    const { files, manifest, changedCategories } = executePush(opts, remote);
-    const fileCount = Object.keys(files).length;
-    syncLog(`[SYNC] Push: ${String(fileCount)} files, ${String(existing.length)} existing`);
-    await this.backend.updateFiles(
-      toStorageFiles(files, MANIFEST_FILENAME, JSON.stringify(manifest, null, 2))
-    );
-    this.localState = buildLocalState(manifest, data, this.getStorageId(), this.config.machineId);
-    return buildPushResult(changedCategories);
+    const ctx = this.getOperationContext();
+    const { result, newState } = await executePushOperation(ctx, data, remote);
+    this.localState = newState;
+    return result;
   }
 
   private async performPull(remote?: Manifest, data?: CategoryData[]): Promise<SyncResult> {
     const m = remote ?? (await fetchManifest(this.backend));
-    if (!m) return buildErrorResult('No remote data found');
-    const sf = await getStorageFilesMap(this.backend);
-    const opts = buildPullOptions(
-      {
-        manifest: m,
-        storageFiles: sf,
-        enabledCategories: this.config.sync,
-        passphrase: buildCryptoOptions(this.passphrase, this.oldPassphrase),
-        backend: this.backend,
-      },
-      data
-    );
-    const { pulledData, changedCategories, tombstonedItems } = await pullCategories(opts);
-    syncLog(`[SYNC] Pull: ${String(changedCategories.length)} categories`);
-    const mergedData = mergeDataForState(data, pulledData);
-    this.localState = buildLocalState(m, mergedData, this.getStorageId(), this.config.machineId);
-    const tombstoneIds = extractTombstoneIds(tombstonedItems);
-    return buildPullResult({ changedCategories, pulledData, tombstonedItems: tombstoneIds });
+    const ctx = this.getOperationContext();
+    const { result, newState } = await executePullOperation(ctx, m ?? undefined, data);
+    if (newState) this.localState = newState;
+    return result;
   }
 
   private async handleConflict(
@@ -194,16 +164,10 @@ export class SyncEngine {
     m: Manifest,
     retry: number
   ): Promise<SyncResult> {
-    const sf = await getStorageFilesMap(this.backend);
     const ctx = {
-      remoteManifest: m,
-      storageFiles: sf,
-      localState: this.localState,
-      passphrase: buildCryptoOptions(this.passphrase, this.oldPassphrase),
-      machineId: this.config.machineId,
-      backend: this.backend,
+      ...this.getOperationContext(),
+      pushFn: (d: CategoryData[], r: number, man: Manifest) => this.push(d, r, man),
     };
-    const { mergedData, conflicts } = await mergeAllCategories(data, ctx);
-    return buildConflictResult(await this.push(mergedData, retry, m), conflicts);
+    return executeConflictOperation(ctx, data, m, retry);
   }
 }

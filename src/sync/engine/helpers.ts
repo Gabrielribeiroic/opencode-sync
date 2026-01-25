@@ -11,11 +11,15 @@ import type {
   SyncConfig,
   Tombstone,
 } from '../../types/index.js';
-import type { CategoryData, PassphraseOption } from '../operations/types.js';
+import { isShardedRef } from '../../types/index.js';
+import type { CategoryData, PassphraseOption, ResolvedShard } from '../operations/types.js';
 import { isItemCategoryData } from '../operations/types.js';
 import type { PullOptions } from '../operations/pull.js';
 import type { PreparePushResult } from '../operations/push.js';
 import { preparePushData } from '../operations/push.js';
+import type { StorageBackend } from '../../storage/index.js';
+import { fetchCategoryShard } from './manifest.js';
+import { syncLog } from './logger.js';
 
 /**
  * Build checksums map from local item category data for merge-based pull.
@@ -63,8 +67,19 @@ export interface PushOptsBase {
 }
 
 /** Execute push and return files for storage */
-export function executePush(opts: PushOptsBase, remoteManifest?: Manifest): PreparePushResult {
-  return preparePushData(remoteManifest ? { ...opts, remoteManifest } : opts);
+export function executePush(
+  opts: PushOptsBase,
+  remoteManifest?: Manifest,
+  resolvedShards?: Record<SyncCategory, ResolvedShard>
+): PreparePushResult {
+  const pushOpts = { ...opts } as Parameters<typeof preparePushData>[0];
+  if (remoteManifest) {
+    pushOpts.remoteManifest = remoteManifest;
+  }
+  if (resolvedShards) {
+    pushOpts.resolvedShards = resolvedShards;
+  }
+  return preparePushData(pushOpts);
 }
 
 /** Convert push files to storage format */
@@ -104,4 +119,39 @@ export function extractTombstoneIds(
     }
   }
   return result;
+}
+
+/**
+ * Fetch resolved shard data for sharded categories.
+ * This ensures we merge with existing remote data instead of overwriting.
+ */
+export async function fetchResolvedShards(
+  backend: StorageBackend,
+  remote?: Manifest
+): Promise<Record<SyncCategory, ResolvedShard> | undefined> {
+  if (!remote) return undefined;
+
+  const shardedCategories: SyncCategory[] = ['sessions', 'messages'];
+  const resolved: Record<SyncCategory, ResolvedShard> = {} as Record<SyncCategory, ResolvedShard>;
+  let hasAny = false;
+
+  for (const category of shardedCategories) {
+    const info = remote.categories[category];
+    if (info && isShardedRef(info)) {
+      syncLog(`[PUSH] Fetching shard for ${category}: ${info.shardFile}`);
+      const shard = await fetchCategoryShard(backend, info.shardFile);
+      if (shard) {
+        resolved[category] = {
+          items: shard.items,
+          tombstones: shard.tombstones,
+        };
+        hasAny = true;
+        syncLog(
+          `[PUSH] Loaded ${String(Object.keys(shard.items).length)} remote ${category} for merge`
+        );
+      }
+    }
+  }
+
+  return hasAny ? resolved : undefined;
 }

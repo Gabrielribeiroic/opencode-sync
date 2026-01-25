@@ -12,7 +12,14 @@ import type {
   SyncConfig,
   PackedChunk,
   Tombstone,
+  ItemInfo,
 } from '../../types/index.js';
+
+/** Pre-resolved shard data for a category */
+export interface ResolvedShard {
+  items: Record<string, ItemInfo>;
+  tombstones: Record<string, Tombstone>;
+}
 
 /**
  * Blob-based category data (config, state, credentials, projects, todos).
@@ -98,6 +105,8 @@ export interface PreparePushOptions {
   passphrase: PassphraseOption;
   existingFiles?: string[];
   remoteManifest?: Manifest;
+  /** Pre-resolved shard data for sharded categories (sessions, messages) */
+  resolvedShards?: Record<SyncCategory, ResolvedShard>;
 }
 
 export { type SyncResult, type Manifest, type SyncCategory, type LocalSyncState };

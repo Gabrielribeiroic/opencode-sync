@@ -24,6 +24,7 @@ import type {
   Manifest,
   SyncCategory,
   PreparePushOptions,
+  ResolvedShard,
 } from './types.js';
 import { isBlobCategoryData, isItemCategoryData } from './types.js';
 
@@ -44,14 +45,22 @@ export interface PreparePushResult {
 
 /** Prepare all data for pushing to remote. */
 export function preparePushData(opts: PreparePushOptions): PreparePushResult {
-  const { localData, config, localState, passphrase, existingFiles, remoteManifest } = opts;
+  const {
+    localData,
+    config,
+    localState,
+    passphrase,
+    existingFiles,
+    remoteManifest,
+    resolvedShards,
+  } = opts;
   const ctx = buildPushContext(config, localState, passphrase);
   const newFiles = new Set<string>();
   const changedCategories: SyncCategory[] = [];
 
   for (const catData of localData) {
     if (!config.sync[catData.category]) continue;
-    const filenames = packCategoryData(catData, remoteManifest, ctx);
+    const filenames = packCategoryData(catData, remoteManifest, ctx, resolvedShards);
     for (const f of filenames) newFiles.add(f);
     changedCategories.push(catData.category);
   }
@@ -64,8 +73,14 @@ export function preparePushData(opts: PreparePushOptions): PreparePushResult {
 /** Extract remote item category data if available */
 function getRemoteItemData(
   remoteManifest: Manifest | undefined,
-  category: SyncCategory
+  category: SyncCategory,
+  resolvedShards?: Record<SyncCategory, ResolvedShard>
 ): { items: Record<string, ItemInfo>; tombstones: Record<string, Tombstone> } {
+  // First check if we have pre-resolved shard data
+  if (resolvedShards?.[category]) {
+    return resolvedShards[category];
+  }
+
   const info = remoteManifest?.categories[category];
   if (info?.type === 'items') {
     return { items: info.items, tombstones: info.tombstones };
@@ -77,10 +92,15 @@ function getRemoteItemData(
 function packCategoryData(
   catData: CategoryData,
   remoteManifest: Manifest | undefined,
-  ctx: PushContext
+  ctx: PushContext,
+  resolvedShards?: Record<SyncCategory, ResolvedShard>
 ): string[] {
   if (isItemCategoryData(catData)) {
-    const { items, tombstones } = getRemoteItemData(remoteManifest, catData.category);
+    const { items, tombstones } = getRemoteItemData(
+      remoteManifest,
+      catData.category,
+      resolvedShards
+    );
     return packItemCategoryData(catData, items, ctx, tombstones);
   }
   if (isBlobCategoryData(catData)) {

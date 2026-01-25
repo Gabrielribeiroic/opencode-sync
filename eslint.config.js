@@ -25,6 +25,7 @@ export default tseslint.config(
     rules: {
       // ═══════════════════════════════════════════════════════════════════════
       // COMPLEXITY RULES - Keep code readable for humans and LLMs
+      // ⚠️ DO NOT MODIFY THESE LIMITS - Refactor code instead of changing rules
       // ═══════════════════════════════════════════════════════════════════════
 
       // Max 200 lines per file - keeps files small and LLM-friendly
