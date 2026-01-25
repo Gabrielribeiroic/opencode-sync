@@ -16,6 +16,7 @@ const ENV_TOKEN_KEY = 'GITHUB_TOKEN';
 
 /**
  * Load plugin configuration from disk with environment variable fallback.
+ * Automatically migrates config: adds missing keys, removes obsolete ones.
  *
  * Token resolution order:
  * 1. Config file token (if exists and non-empty)
@@ -23,33 +24,35 @@ const ENV_TOKEN_KEY = 'GITHUB_TOKEN';
  * 3. null (no token available)
  */
 export async function loadConfig(pathConfig: PathConfig): Promise<SyncConfig | null> {
-  let config: SyncConfig | null = null;
+  let rawConfig: Record<string, unknown> | null = null;
 
   try {
     const content = await readFile(pathConfig.pluginConfigPath, 'utf-8');
-    config = JSON.parse(content) as SyncConfig;
+    rawConfig = JSON.parse(content) as Record<string, unknown>;
   } catch {
     // Config file doesn't exist or is invalid - will try env var
   }
 
   const envToken = process.env[ENV_TOKEN_KEY];
 
-  if (config) {
-    // Config exists - merge with defaults and use env var as fallback if no token
-    const mergedConfig = {
-      ...DEFAULT_CONFIG,
-      ...config,
-      sync: { ...DEFAULT_CONFIG.sync, ...config.sync },
-    };
+  if (rawConfig) {
+    // Migrate config: use defaults, keep user values, remove obsolete keys
+    const migratedConfig = migrateConfig(rawConfig);
 
-    if (!mergedConfig.token && envToken) {
-      mergedConfig.token = envToken;
+    if (!migratedConfig.token && envToken) {
+      migratedConfig.token = envToken;
     }
-    // Generate machineId if missing
-    if (!mergedConfig.machineId) {
-      mergedConfig.machineId = generateMachineId();
+    if (!migratedConfig.machineId) {
+      migratedConfig.machineId = generateMachineId();
     }
-    return mergedConfig;
+
+    // Save migrated config if it changed
+    const configChanged = !configsEqual(rawConfig, migratedConfig as unknown as RawConfig);
+    if (configChanged) {
+      await saveConfig(pathConfig, migratedConfig);
+    }
+
+    return migratedConfig;
   }
 
   // No config file - create minimal config from env var if available
@@ -62,6 +65,86 @@ export async function loadConfig(pathConfig: PathConfig): Promise<SyncConfig | n
   }
 
   return null;
+}
+
+/** Raw config from disk (untyped) */
+type RawConfig = Record<string, unknown>;
+
+/** Keys that are user-specific and should always be preserved */
+const USER_KEYS = [
+  'token',
+  'machineId',
+  'repoOwner',
+  'repoName',
+  'branch',
+  'keySalt',
+  'passphraseHash',
+  'oldEncryptionKey',
+] as const;
+
+/**
+ * Migrate config to latest schema.
+ * - Adds missing keys from DEFAULT_CONFIG
+ * - Removes keys not in DEFAULT_CONFIG (except user-specific keys)
+ * - Preserves user values for existing keys
+ */
+function migrateConfig(raw: RawConfig): SyncConfig {
+  // Start with defaults
+  const migrated: RawConfig = { ...DEFAULT_CONFIG };
+
+  // Copy user-specific keys
+  for (const key of USER_KEYS) {
+    if (key in raw) {
+      migrated[key] = raw[key];
+    }
+  }
+
+  // For config keys in DEFAULT_CONFIG, use user value if present
+  for (const key of Object.keys(DEFAULT_CONFIG)) {
+    if (!(key in raw)) continue;
+    if (key === 'sync') {
+      migrated['sync'] = migrateSyncCategories(raw['sync'] as RawConfig | undefined);
+    } else {
+      migrated[key] = raw[key];
+    }
+  }
+
+  return migrated as unknown as SyncConfig;
+}
+
+/**
+ * Migrate sync categories: merge with defaults, remove obsolete keys.
+ */
+function migrateSyncCategories(rawSync: RawConfig | undefined): RawConfig {
+  const merged: RawConfig = { ...DEFAULT_CONFIG.sync, ...rawSync };
+  const validKeys = new Set(Object.keys(DEFAULT_CONFIG.sync));
+  const result: RawConfig = {};
+  for (const key of Object.keys(merged)) {
+    if (validKeys.has(key)) {
+      result[key] = merged[key];
+    }
+  }
+  return result;
+}
+
+/**
+ * Check if migration actually changed config values (ignoring key order).
+ * Only compares keys that exist in DEFAULT_CONFIG + USER_KEYS.
+ */
+function configsEqual(raw: RawConfig, migrated: RawConfig): boolean {
+  const allKeys = [...Object.keys(DEFAULT_CONFIG), ...USER_KEYS];
+  for (const key of allKeys) {
+    const rawVal = raw[key];
+    const migVal = migrated[key];
+    if (rawVal === undefined && migVal === undefined) continue;
+    if (rawVal === undefined || migVal === undefined) return false;
+    if (JSON.stringify(rawVal) !== JSON.stringify(migVal)) return false;
+  }
+  // Check if raw has extra keys that will be removed
+  for (const key of Object.keys(raw)) {
+    if (!(key in migrated)) return false;
+  }
+  return true;
 }
 
 /**

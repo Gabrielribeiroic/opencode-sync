@@ -14,6 +14,8 @@ export class FileWatcher {
   private readonly watchers = new Map<string, FSWatcher>();
   private readonly pendingEvents = new Map<string, WatcherEvent>();
   private debounceTimer: ReturnType<typeof setTimeout> | null = null;
+  private maxDelayTimer: ReturnType<typeof setTimeout> | null = null;
+  private firstEventTime: number | null = null;
   private isRunning = false;
 
   constructor(options: FileWatcherOptions) {
@@ -63,6 +65,12 @@ export class FileWatcher {
       this.debounceTimer = null;
     }
 
+    if (this.maxDelayTimer) {
+      clearTimeout(this.maxDelayTimer);
+      this.maxDelayTimer = null;
+    }
+
+    this.firstEventTime = null;
     this.pendingEvents.clear();
   }
 
@@ -81,6 +89,17 @@ export class FileWatcher {
     const event: WatcherEvent = { type, path, category };
     this.pendingEvents.set(path, event);
 
+    // Track first event time for max delay cap
+    if (this.firstEventTime === null) {
+      this.firstEventTime = Date.now();
+
+      // Set up max delay timer - will force flush even if activity continues
+      this.maxDelayTimer = setTimeout(() => {
+        void this.flushEvents();
+      }, this.options.maxDebounceMs);
+    }
+
+    // Reset debounce timer on each event
     if (this.debounceTimer) {
       clearTimeout(this.debounceTimer);
     }
@@ -95,7 +114,17 @@ export class FileWatcher {
 
     const events = Array.from(this.pendingEvents.values());
     this.pendingEvents.clear();
-    this.debounceTimer = null;
+
+    // Clear both timers
+    if (this.debounceTimer) {
+      clearTimeout(this.debounceTimer);
+      this.debounceTimer = null;
+    }
+    if (this.maxDelayTimer) {
+      clearTimeout(this.maxDelayTimer);
+      this.maxDelayTimer = null;
+    }
+    this.firstEventTime = null;
 
     try {
       await this.options.onEvent(events);

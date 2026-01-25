@@ -243,6 +243,7 @@ function startFileWatcher(pathConfig: PathConfig): void {
     activeWatcher = new FileWatcher({
       pathConfig,
       debounceMs: state.config.fileWatcherDebounceMs,
+      maxDebounceMs: state.config.maxDebounceMs,
       enabledCategories,
       onEvent: async () => {
         try {
@@ -321,6 +322,9 @@ export const OpencodeSyncPlugin = async (_ctx: unknown): Promise<Record<string, 
       log('Plugin ready');
     }
 
+    // Return cleanup function
+    // Note: OpenCode doesn't currently expose a shutdown hook for plugins,
+    // so this cleanup may not be called. See: https://github.com/anomalyco/opencode/issues/XXX
     return { cleanup: stopBackgroundSync };
   } catch (error) {
     const errMsg = error instanceof Error ? error.message : String(error);

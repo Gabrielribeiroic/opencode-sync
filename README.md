@@ -8,7 +8,7 @@ Sync your OpenCode configuration, sessions, and data across multiple machines us
 - **Multi-Machine Support** - Safely sync across laptops, VMs, and servers simultaneously
 - **Conflict Resolution** - Vector clocks detect conflicts, three-way merge resolves them
 - **Encrypted Credentials** - AES-256-GCM encryption for sensitive data
-- **Auto-Sync** - Syncs on startup, on file changes (2s debounce), and every minute
+- **Auto-Sync** - Syncs on startup, on file changes (5s debounce, 30s max), and every 5 minutes
 - **Offline-Friendly** - Works offline, syncs when reconnected
 - **Atomic Updates** - Uses Git's compare-and-swap for safe concurrent access
 
@@ -52,11 +52,9 @@ npm install && npm run build
 | State | Model selections, prompt history, stashed prompts | ✅ Enabled |
 | Credentials | OAuth tokens, MCP auth (encrypted) | ✅ Enabled |
 | Sessions | Session metadata and history | ✅ Enabled |
-| Messages | Conversation messages and parts | ❌ Disabled* |
+| Messages | Conversation messages and parts | ✅ Enabled |
 | Projects | Project configurations | ✅ Enabled |
 | Todos | Task lists and session diffs | ✅ Enabled |
-
-*Messages sync is disabled by default because it can be very large (8MB+). Enable it in config if needed.
 
 ## How It Works
 
@@ -154,13 +152,15 @@ On subsequent runs:
   "repoName": ".opencode-sync",
   "autoSyncOnStartup": true,
   "continuousSync": true,
-  "syncIntervalMinutes": 1,
+  "syncIntervalMinutes": 5,
+  "fileWatcherDebounceMs": 5000,
+  "maxDebounceMs": 30000,
   "sync": {
     "config": true,
     "state": true,
     "credentials": true,
     "sessions": true,
-    "messages": false,
+    "messages": true,
     "projects": true,
     "todos": true
   },
@@ -168,19 +168,22 @@ On subsequent runs:
 }
 ```
 
-**Note:** `messages` is `false` by default because conversation history can be very large (8MB+). Set to `true` if you want to sync messages across machines.
+**Note:** All categories are enabled by default. Disable `messages` if you have very large conversation history (8MB+) and want to reduce sync size.
 
 ## Sync Timing
 
-The plugin syncs at these times:
+The plugin uses **activity-aware batching** to prevent excessive syncs during heavy IO:
 
-| Trigger | When |
-|---------|------|
-| **Startup** | Immediately when OpenCode starts |
-| **File Changes** | 2 seconds after local OpenCode files change |
-| **Interval** | Every 1 minute (configurable) |
+| Trigger | Default | Description |
+|---------|---------|-------------|
+| **Startup** | Enabled | Immediately when OpenCode starts |
+| **File Changes** | 5s debounce | Wait for inactivity before syncing |
+| **Max Delay** | 30s cap | Force sync even during heavy activity |
+| **Interval** | 5 minutes | Periodic sync regardless of changes |
 
-This is **not realtime** - there's typically a 1-60 second delay depending on when changes occur.
+During heavy activity, syncs are batched and fire at most every 30 seconds.
+
+See [docs/SYNC.md](docs/SYNC.md) for detailed architecture documentation.
 
 ## Security
 

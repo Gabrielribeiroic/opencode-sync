@@ -22,7 +22,8 @@ export function createFileWatcher(
   return new FileWatcher({
     pathConfig,
     onEvent,
-    debounceMs: options?.debounceMs ?? 2000,
+    debounceMs: options?.debounceMs ?? 5000,
+    maxDebounceMs: options?.maxDebounceMs ?? 30000,
     enabledCategories:
       options?.enabledCategories ??
       new Set(['config', 'state', 'credentials', 'sessions', 'messages', 'projects', 'todos']),

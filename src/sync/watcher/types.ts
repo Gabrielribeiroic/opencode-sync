@@ -9,6 +9,8 @@ import type { SyncCategory, WatcherEvent, PathConfig } from '../../types/index.j
 export interface FileWatcherOptions {
   pathConfig: PathConfig;
   debounceMs: number;
+  /** Maximum time to wait before syncing even if activity continues (ms) */
+  maxDebounceMs: number;
   onEvent: (events: WatcherEvent[]) => void | Promise<void>;
   enabledCategories: Set<SyncCategory>;
 }

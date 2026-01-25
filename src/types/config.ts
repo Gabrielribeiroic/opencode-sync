@@ -25,6 +25,8 @@ export interface SyncConfig {
   continuousSync: boolean;
   syncIntervalMinutes: number;
   fileWatcherDebounceMs: number;
+  /** Maximum time to wait before syncing even if activity continues (ms) */
+  maxDebounceMs: number;
 
   // What to sync
   sync: {
@@ -53,8 +55,9 @@ export interface SyncConfig {
 export const DEFAULT_CONFIG: Omit<SyncConfig, 'token' | 'machineId'> = {
   autoSyncOnStartup: true,
   continuousSync: true,
-  syncIntervalMinutes: 1,
-  fileWatcherDebounceMs: 2000,
+  syncIntervalMinutes: 5,
+  fileWatcherDebounceMs: 5000,
+  maxDebounceMs: 30000,
   sync: {
     config: true,
     state: true,
