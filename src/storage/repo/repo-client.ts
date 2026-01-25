@@ -114,15 +114,16 @@ export class RepoStorageBackend implements StorageBackend {
     const fileCount = Object.keys(files).length;
     const startTime = Date.now();
 
-    // Get current HEAD commit SHA
+    // Get current HEAD commit and its tree SHA
     const headSha = await this.getHeadSha();
+    const baseTreeSha = await this.getCommitTreeSha(headSha);
 
     // Build tree entries with inline content (no separate blob creation needed)
     const treeEntries = this.buildTreeEntries(files);
     this.logProgress(`Prepared ${String(treeEntries.length)} tree entries`);
 
     // Create new tree with base_tree for incremental update
-    const newTreeSha = await this.createTree(treeEntries, headSha);
+    const newTreeSha = await this.createTree(treeEntries, baseTreeSha);
 
     // Create commit
     const message = `Sync update: ${String(fileCount)} files`;
@@ -381,6 +382,16 @@ export class RepoStorageBackend implements StorageBackend {
     }
     const data = (await res.json()) as GitRef;
     return data.object.sha;
+  }
+
+  /** Get the tree SHA for a commit */
+  private async getCommitTreeSha(commitSha: string): Promise<string> {
+    const res = await this.fetch(`/git/commits/${commitSha}`);
+    if (!res.ok) {
+      throw new RepoApiError('Failed to get commit tree', res.status);
+    }
+    const data = (await res.json()) as { tree: { sha: string } };
+    return data.tree.sha;
   }
 
   /**
