@@ -14,34 +14,12 @@ Sync your OpenCode configuration, sessions, and data across multiple machines us
 
 ## Installation
 
-### Option 1: npm package (Recommended)
-
 Add to your `opencode.json` config file:
 
 ```json
 {
   "plugin": ["oc-sync"]
 }
-```
-
-### Option 2: Local plugin directory
-
-Clone into the global plugins directory:
-
-```bash
-cd ~/.config/opencode/plugins
-git clone https://github.com/ErcinDedeoglu/opencode-sync
-cd opencode-sync
-npm install && npm run build
-```
-
-Or for project-specific installation:
-
-```bash
-cd your-project/.opencode/plugins
-git clone https://github.com/ErcinDedeoglu/opencode-sync
-cd opencode-sync
-npm install && npm run build
 ```
 
 ## What Gets Synced
