@@ -178,6 +178,8 @@ function packItemCategoryData(
 
 /**
  * Check if local data needs pushing by comparing checksums.
+ * For sharded categories (sessions, messages), we skip checksum comparison
+ * since we don't have the shard content loaded. These rely on vector clock comparison.
  */
 export function needsPush(localData: CategoryData[], remoteManifest: Manifest | null): boolean {
   if (!remoteManifest) return true;
@@ -186,8 +188,11 @@ export function needsPush(localData: CategoryData[], remoteManifest: Manifest | 
     const remoteInfo = remoteManifest.categories[catData.category];
 
     if (isItemCategoryData(catData)) {
-      // Per-item comparison
-      if (!remoteInfo || !isItemCatInfo(remoteInfo)) return true;
+      // Per-item comparison - but only if remote is also items type (not sharded)
+      if (!remoteInfo) return true;
+      // Skip comparison for sharded categories - they use vector clock comparison
+      if (remoteInfo.type === 'sharded') continue;
+      if (!isItemCatInfo(remoteInfo)) return true;
       const diff = diffItems(catData.checksums, remoteInfo.items);
       if (diff.toUpload.length > 0) return true;
     } else if (isBlobCategoryData(catData)) {

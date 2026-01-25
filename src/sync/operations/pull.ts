@@ -115,8 +115,15 @@ async function pullShardedCategoryToAcc(
   backend: StorageBackend,
   acc: PullAccumulator
 ): Promise<void> {
+  syncLog(`[PULL] Fetching shard: ${ref.shardFile} (itemCount: ${String(ref.itemCount)})`);
   const shard = await fetchCategoryShard(backend, ref.shardFile);
-  if (!shard) return;
+  if (!shard) {
+    syncLog(`[PULL] ${cat}: shard file not found or empty`);
+    return;
+  }
+  syncLog(
+    `[PULL] ${cat}: shard has ${String(Object.keys(shard.items).length)} items, ${String(Object.keys(shard.tombstones).length)} tombstones`
+  );
 
   // Convert shard to ItemCategoryInfo-like structure for pullItemCategory
   const info: ItemCategoryInfo = {

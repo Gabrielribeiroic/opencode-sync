@@ -103,7 +103,9 @@ export class RepoStorageBackend implements StorageBackend {
 
   public async getFile(path: string): Promise<string | null> {
     const fullPath = `${SYNC_DIR}/${path}`;
-    const res = await this.fetchAllowNotFound(`/contents/${fullPath}`);
+    // Add cache-bust to avoid stale GitHub API responses
+    const cacheBust = Date.now();
+    const res = await this.fetchAllowNotFound(`/contents/${fullPath}?cb=${String(cacheBust)}`);
     if (!res?.ok) return null;
 
     const data = (await res.json()) as ContentFile;
@@ -111,7 +113,8 @@ export class RepoStorageBackend implements StorageBackend {
     // For files >1MB, GitHub returns empty content and provides download_url
     if (!data.content && data.size > 1000000) {
       const branch = await this.getBranch();
-      const downloadUrl = `https://raw.githubusercontent.com/${this.owner}/${this.repo}/${branch}/${fullPath}`;
+      // Add cache-bust to avoid stale CDN responses
+      const downloadUrl = `https://raw.githubusercontent.com/${this.owner}/${this.repo}/${branch}/${fullPath}?cb=${String(cacheBust)}`;
       const downloadRes = await fetchWithRetry(
         downloadUrl,
         {
