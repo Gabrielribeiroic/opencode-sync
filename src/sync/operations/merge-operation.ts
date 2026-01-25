@@ -2,6 +2,8 @@
  * Merge Operation
  *
  * Handles merging local and remote data when conflicts are detected.
+ * Currently only supports blob-based categories. Per-item categories
+ * use additive merge (no overwrite) which doesn't require conflict resolution.
  */
 
 import { calculateChecksum } from '../packer.js';
@@ -9,16 +11,36 @@ import { mergeJson, mergeJsonl } from '../merge/index.js';
 import { maybeDecrypt } from './helpers.js';
 import { downloadChunks } from './pull.js';
 import { unpackCategory } from '../packer.js';
+import { mergeTombstones } from '../tombstone.js';
 import type { StorageBackend } from '../../storage/index.js';
-import type { ConflictInfo } from '../../types/index.js';
+import type { ConflictInfo, BlobCategoryInfo } from '../../types/index.js';
+import type { ItemCategoryInfo, Tombstone } from '../../types/manifest.js';
 import type {
   CategoryData,
+  BlobCategoryData,
+  ItemCategoryData,
   StorageFiles,
   Manifest,
   SyncCategory,
   LocalSyncState,
   PassphraseOption,
 } from './types.js';
+import { isBlobCategoryData, isItemCategoryData } from './types.js';
+
+/** Local type guard to check if remote category info is blob-based */
+function isBlobInfo(info: { type: string }): info is BlobCategoryInfo {
+  return info.type === 'blob';
+}
+
+/** Local type guard to check if remote category info is item-based */
+function isItemInfo(info: { type: string }): info is ItemCategoryInfo {
+  return info.type === 'items';
+}
+
+/** Safely extract tombstones from item category info */
+function getRemoteTombstones(info: ItemCategoryInfo): Record<string, Tombstone> {
+  return info.tombstones;
+}
 
 export interface MergeAllResult {
   mergedData: CategoryData[];
@@ -36,6 +58,7 @@ interface MergeContext {
 
 /**
  * Merge all categories with remote data.
+ * Blob categories use three-way merge; per-item categories merge tombstones.
  */
 export async function mergeAllCategories(
   localData: CategoryData[],
@@ -45,31 +68,85 @@ export async function mergeAllCategories(
   const mergedData: CategoryData[] = [];
 
   for (const item of localData) {
-    const result = await mergeSingleCategory(item, context, conflicts);
-    mergedData.push(result);
+    if (isBlobCategoryData(item)) {
+      const result = await mergeBlobCategory(item, context, conflicts);
+      mergedData.push(result);
+    } else if (isItemCategoryData(item)) {
+      const result = mergeItemCategory(item, context);
+      mergedData.push(result);
+    }
   }
 
   return { mergedData, conflicts };
 }
 
 /**
- * Merge a single category with remote data.
+ * Merge a per-item category with remote data.
+ * Items use additive merge, but tombstones need to be merged.
+ * Items that are tombstoned remotely should be removed from local items.
  */
-async function mergeSingleCategory(
-  item: CategoryData,
+function mergeItemCategory(item: ItemCategoryData, context: MergeContext): ItemCategoryData {
+  const { category, items, checksums, tombstones: localTombstones } = item;
+  const remoteInfo = context.remoteManifest.categories[category];
+
+  // No remote info or not an item category - return as-is
+  if (!remoteInfo || !isItemInfo(remoteInfo)) {
+    return item;
+  }
+
+  // Merge tombstones from local and remote
+  const mergedTombstones = mergeTombstones(localTombstones ?? {}, getRemoteTombstones(remoteInfo));
+
+  // Remove items that are tombstoned (either locally or remotely)
+  const filteredItems = filterTombstonedItems(items, mergedTombstones);
+  const filteredChecksums = filterTombstonedItems(checksums, mergedTombstones);
+
+  const result: ItemCategoryData = {
+    category,
+    type: 'items',
+    items: filteredItems,
+    checksums: filteredChecksums,
+  };
+
+  if (Object.keys(mergedTombstones).length > 0) {
+    result.tombstones = mergedTombstones;
+  }
+
+  return result;
+}
+
+/** Remove items that have tombstones */
+function filterTombstonedItems<T>(
+  items: Record<string, T>,
+  tombstones: Record<string, Tombstone>
+): Record<string, T> {
+  const result: Record<string, T> = {};
+  for (const [id, value] of Object.entries(items)) {
+    if (!(id in tombstones)) {
+      result[id] = value;
+    }
+  }
+  return result;
+}
+
+/**
+ * Merge a blob-based category with remote data.
+ */
+async function mergeBlobCategory(
+  item: BlobCategoryData,
   context: MergeContext,
   conflicts: ConflictInfo[]
-): Promise<CategoryData> {
+): Promise<BlobCategoryData> {
   const { category, data, isJsonl } = item;
   const remoteInfo = context.remoteManifest.categories[category];
 
-  if (!remoteInfo) {
-    return { category, data };
+  if (!remoteInfo || !isBlobInfo(remoteInfo)) {
+    return { category, type: 'blob', data };
   }
 
   const localChecksum = calculateChecksum(data);
   if (localChecksum === remoteInfo.checksum) {
-    return { category, data };
+    return { category, type: 'blob', data };
   }
 
   const remoteData = await downloadAndDecryptCategory(
@@ -86,7 +163,7 @@ async function mergeSingleCategory(
     conflicts.push(createConflictInfo(category, localChecksum, remoteInfo, context.machineId));
   }
 
-  return { category, data: merged.data, isJsonl: isJsonl ?? false };
+  return { category, type: 'blob', data: merged.data, isJsonl: isJsonl ?? false };
 }
 
 /**
@@ -94,16 +171,13 @@ async function mergeSingleCategory(
  */
 async function downloadAndDecryptCategory(
   category: string,
-  info: { files: string[]; checksum: string },
+  info: BlobCategoryInfo,
   storageFiles: StorageFiles,
   passphrase: PassphraseOption,
   backend: StorageBackend
 ): Promise<string> {
   const chunks = await downloadChunks(storageFiles, info.files, backend);
   const data = unpackCategory(chunks, info.checksum);
-
-  // Let maybeDecrypt handle credentials - it will detect if data is encrypted
-  // and use the appropriate key (current or old for key rotation)
   return maybeDecrypt(category, data, passphrase);
 }
 
@@ -151,7 +225,7 @@ function mergeJsonData(
 function createConflictInfo(
   category: SyncCategory,
   localChecksum: string,
-  remoteInfo: { checksum: string; lastModifiedBy: string },
+  remoteInfo: BlobCategoryInfo,
   machineId: string
 ): ConflictInfo {
   return {

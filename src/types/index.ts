@@ -16,8 +16,34 @@ export type { SyncCategory } from './categories.js';
 export { SYNC_CATEGORIES, isSyncCategory } from './categories.js';
 
 // Manifest
-export type { CategoryInfo, AdvisoryLock, SyncHistoryEntry, Manifest } from './manifest.js';
-export { createEmptyManifest, MAX_SYNC_HISTORY } from './manifest.js';
+export type {
+  CategoryInfo,
+  BlobCategoryInfo,
+  ItemCategoryInfo,
+  ItemInfo,
+  Tombstone,
+  AdvisoryLock,
+  SyncHistoryEntry,
+  Manifest,
+  // Sharded manifest types
+  ShardedCategoryRef,
+  CategoryShard,
+  ExtendedCategoryInfo,
+} from './manifest.js';
+export {
+  createEmptyManifest,
+  MAX_SYNC_HISTORY,
+  isItemCategory,
+  isBlobCategory,
+  shouldUseItemSync,
+  ITEM_SYNC_CATEGORIES,
+  DEFAULT_TOMBSTONE_GRACE_DAYS,
+  // Sharded manifest helpers
+  isShardedRef,
+  getShardFilename,
+  SHARDING_THRESHOLD,
+  shouldShard,
+} from './manifest.js';
 
 // Sync Operations
 export type {

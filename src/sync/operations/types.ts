@@ -11,12 +11,46 @@ import type {
   LocalSyncState,
   SyncConfig,
   PackedChunk,
+  Tombstone,
 } from '../../types/index.js';
 
-export interface CategoryData {
+/**
+ * Blob-based category data (config, state, credentials, projects, todos).
+ * All data packed into a single blob.
+ */
+export interface BlobCategoryData {
   category: SyncCategory;
+  type: 'blob';
   data: string;
   isJsonl?: boolean;
+}
+
+/**
+ * Per-item category data (sessions, messages).
+ * Each item tracked separately for granular sync.
+ */
+export interface ItemCategoryData {
+  category: SyncCategory;
+  type: 'items';
+  /** Map of item ID → item content (JSON string) */
+  items: Record<string, string>;
+  /** Map of item ID → checksum for diff detection */
+  checksums: Record<string, string>;
+  /** Map of item ID → tombstone for locally deleted items */
+  tombstones?: Record<string, Tombstone>;
+}
+
+/** Union type for category data */
+export type CategoryData = BlobCategoryData | ItemCategoryData;
+
+/** Check if category data is blob-based */
+export function isBlobCategoryData(data: CategoryData): data is BlobCategoryData {
+  return data.type === 'blob';
+}
+
+/** Check if category data is item-based */
+export function isItemCategoryData(data: CategoryData): data is ItemCategoryData {
+  return data.type === 'items';
 }
 
 /** Storage files structure (backend-agnostic) */
@@ -54,6 +88,16 @@ export interface PullResult {
 
 export interface ChunkDownloadResult {
   chunks: PackedChunk[];
+}
+
+/** Options for push data preparation */
+export interface PreparePushOptions {
+  localData: CategoryData[];
+  config: { machineId: string; sync: Record<SyncCategory, boolean> };
+  localState: LocalSyncState | null;
+  passphrase: PassphraseOption;
+  existingFiles?: string[];
+  remoteManifest?: Manifest;
 }
 
 export { type SyncResult, type Manifest, type SyncCategory, type LocalSyncState };

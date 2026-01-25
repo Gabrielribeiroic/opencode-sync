@@ -18,16 +18,31 @@ export function buildPushResult(changedCategories: SyncCategory[]): SyncResult {
   };
 }
 
+/** Options for building pull result */
+export interface BuildPullResultOptions {
+  changedCategories: SyncCategory[];
+  pulledData?: unknown;
+  tombstonedItems?: Partial<Record<SyncCategory, string[]>>;
+}
+
 /**
  * Build a success result for pull operations.
  */
-export function buildPullResult(changedCategories: SyncCategory[]): SyncResult {
-  return {
+export function buildPullResult(opts: BuildPullResultOptions): SyncResult {
+  const { changedCategories, pulledData, tombstonedItems } = opts;
+  const result: SyncResult = {
     success: true,
     action: 'pulled',
     message: `Pulled ${String(changedCategories.length)} categories`,
     changedCategories,
   };
+  if (pulledData) {
+    result.pulledData = pulledData;
+  }
+  if (tombstonedItems && Object.keys(tombstonedItems).length > 0) {
+    result.tombstonedItems = tombstonedItems;
+  }
+  return result;
 }
 
 /**

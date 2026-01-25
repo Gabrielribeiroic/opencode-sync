@@ -43,3 +43,16 @@ export type { MergeResult, MergeConflict } from './merge/types.js';
 // Watcher
 export { FileWatcher, createFileWatcher } from './watcher/index.js';
 export type { FileWatcherOptions } from './watcher/index.js';
+
+// Tombstone
+export {
+  createTombstone,
+  isTombstoneExpired,
+  filterExpiredTombstones,
+  cleanupExpiredTombstones,
+  mergeTombstones,
+  isItemTombstoned,
+  getItemsToDelete,
+  detectLocalDeletions,
+} from './tombstone.js';
+export type { FilterTombstonesResult } from './tombstone.js';

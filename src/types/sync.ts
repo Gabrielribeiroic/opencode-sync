@@ -18,6 +18,8 @@ export interface LocalSyncState {
   categoryChecksums: Partial<Record<SyncCategory, string>>;
   // Base versions for three-way merge (stored after each successful sync)
   baseVersions: Partial<Record<SyncCategory, string>>; // JSON stringified data
+  // Per-item tracking for deletion detection (sessions, messages)
+  itemChecksums?: Partial<Record<SyncCategory, Record<string, string>>>;
 }
 
 // ============================================================================
@@ -33,6 +35,10 @@ export interface SyncResult {
   changedCategories?: SyncCategory[];
   conflicts?: ConflictInfo[];
   error?: Error;
+  /** Data pulled from remote (for per-item sync) */
+  pulledData?: unknown;
+  /** Item IDs that should be deleted locally (tombstoned remotely) */
+  tombstonedItems?: Partial<Record<SyncCategory, string[]>>;
 }
 
 export interface ConflictInfo {

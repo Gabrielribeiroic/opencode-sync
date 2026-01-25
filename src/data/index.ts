@@ -7,7 +7,7 @@
 export { loadLocalData } from './category-loader.js';
 export type { LoadedData, LoadError } from './category-loader.js';
 
-export { writeLocalData } from './writer.js';
+export { writeLocalData, deleteTombstonedItems } from './writer.js';
 
 export {
   loadConfig,

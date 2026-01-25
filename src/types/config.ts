@@ -44,6 +44,10 @@ export interface SyncConfig {
   advisoryLockTimeoutSeconds: number;
   maxRetryAttempts: number;
   retryDelayMs: number;
+
+  // Tombstone settings (for per-item sync deletion propagation)
+  /** Grace period in days before tombstones expire and are garbage collected (default: 30) */
+  tombstoneGraceDays: number;
 }
 
 export const DEFAULT_CONFIG: Omit<SyncConfig, 'token' | 'machineId'> = {
@@ -64,4 +68,5 @@ export const DEFAULT_CONFIG: Omit<SyncConfig, 'token' | 'machineId'> = {
   advisoryLockTimeoutSeconds: 30,
   maxRetryAttempts: 3,
   retryDelayMs: 1000,
+  tombstoneGraceDays: 30,
 };

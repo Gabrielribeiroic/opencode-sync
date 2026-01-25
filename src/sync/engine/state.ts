@@ -8,9 +8,11 @@ import { calculateChecksum } from '../packer.js';
 import type { StorageBackend } from '../../storage/index.js';
 import type { Manifest, LocalSyncState } from '../../types/index.js';
 import type { CategoryData, StorageFiles } from '../operations/types.js';
+import { isBlobCategoryData } from '../operations/types.js';
 
 /**
  * Build updated local state after a sync operation.
+ * Only tracks base versions for blob categories (used for three-way merge).
  */
 export function buildLocalState(
   manifest: Manifest,
@@ -22,9 +24,13 @@ export function buildLocalState(
   const checksums: LocalSyncState['categoryChecksums'] = {};
   const baseVersions: LocalSyncState['baseVersions'] = {};
 
-  for (const { category, data: content } of data) {
-    checksums[category] = calculateChecksum(content);
-    baseVersions[category] = content;
+  for (const item of data) {
+    // Only blob categories have a single data string for checksum/base tracking
+    if (isBlobCategoryData(item)) {
+      checksums[item.category] = calculateChecksum(item.data);
+      baseVersions[item.category] = item.data;
+    }
+    // Per-item categories don't need base versions (they use additive merge)
   }
 
   return {

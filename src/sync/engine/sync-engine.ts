@@ -1,10 +1,7 @@
-/**
- * Sync Engine - Core orchestration for push/pull operations.
- */
 import type { StorageBackend } from '../../storage/index.js';
 import { RepoConflictError } from '../../storage/index.js';
 import { compareVectorClocks } from '../vector-clock.js';
-import { preparePushData, needsPush } from '../operations/push.js';
+import { needsPush } from '../operations/push.js';
 import { pullCategories } from '../operations/pull.js';
 import { mergeAllCategories } from '../operations/merge-operation.js';
 import {
@@ -29,6 +26,13 @@ import {
 } from './result.js';
 import { checkMaxRetries, calculateBackoff, sleep } from './retry.js';
 import { acquireLock, releaseLock, getLockHolder } from '../local-lock.js';
+import {
+  buildPullOptions,
+  executePush,
+  toStorageFiles,
+  buildCryptoOptions,
+  extractTombstoneIds,
+} from './helpers.js';
 
 export { type CategoryData };
 
@@ -40,62 +44,51 @@ export class SyncEngine {
   private readonly oldPassphrase: string | undefined;
   private readonly lockPath: string | undefined;
 
-  constructor(options: SyncEngineOptions) {
-    this.backend = options.backend;
-    this.config = options.config;
-    this.localState = options.localState;
-    this.passphrase = options.passphrase;
-    this.oldPassphrase = options.oldPassphrase;
-    this.lockPath = options.lockPath;
+  constructor(opts: SyncEngineOptions) {
+    this.backend = opts.backend;
+    this.config = opts.config;
+    this.localState = opts.localState;
+    this.passphrase = opts.passphrase;
+    this.oldPassphrase = opts.oldPassphrase;
+    this.lockPath = opts.lockPath;
   }
 
-  /** Get crypto options for encryption/decryption with key rotation support */
-  private getCryptoOptions(): { passphrase?: string; oldPassphrase?: string } {
-    const result: { passphrase?: string; oldPassphrase?: string } = {};
-    if (this.passphrase) result.passphrase = this.passphrase;
-    if (this.oldPassphrase) result.oldPassphrase = this.oldPassphrase;
-    return result;
-  }
-
-  public async sync(localData: CategoryData[]): Promise<SyncResult> {
+  public async sync(data: CategoryData[]): Promise<SyncResult> {
     if (!this.hasStorageConfigured()) return buildErrorResult('No storage configured');
-
-    // Acquire local lock to prevent concurrent syncs on same machine
     if (this.lockPath && !acquireLock(this.lockPath, 'sync')) {
-      const holder = getLockHolder(this.lockPath);
-      return buildSkippedResult(`Another instance is syncing${holder ? ` (${holder})` : ''}`);
+      const h = getLockHolder(this.lockPath);
+      return buildSkippedResult(`Another instance is syncing${h ? ` (${h})` : ''}`);
     }
-
     try {
-      return await this.performSync(localData);
-    } catch (error) {
-      return handleSyncError(error);
+      return await this.performSync(data);
+    } catch (e) {
+      return handleSyncError(e);
     } finally {
       if (this.lockPath) releaseLock(this.lockPath);
     }
   }
 
-  public async push(localData: CategoryData[], retryCount = 0): Promise<SyncResult> {
+  public async push(data: CategoryData[], retry = 0, manifest?: Manifest): Promise<SyncResult> {
     if (!this.hasStorageConfigured()) return buildErrorResult('No storage configured');
     try {
-      return await this.performPush(localData);
-    } catch (error) {
-      if (error instanceof RepoConflictError) {
-        const maxError = checkMaxRetries(retryCount);
-        if (maxError) return maxError;
-        await sleep(calculateBackoff(retryCount));
-        return this.syncWithRetry(localData, retryCount + 1);
+      return await this.performPush(data, manifest);
+    } catch (e) {
+      if (e instanceof RepoConflictError) {
+        const max = checkMaxRetries(retry);
+        if (max) return max;
+        await sleep(calculateBackoff(retry));
+        return this.syncWithRetry(data, retry + 1);
       }
-      throw error;
+      throw e;
     }
   }
 
-  public async pull(remoteManifest?: Manifest): Promise<SyncResult> {
+  public async pull(manifest?: Manifest, data?: CategoryData[]): Promise<SyncResult> {
     if (!this.hasStorageConfigured()) return buildErrorResult('No storage configured');
     try {
-      return await this.performPull(remoteManifest);
-    } catch (error) {
-      return handleSyncError(error);
+      return await this.performPull(manifest, data);
+    } catch (e) {
+      return handleSyncError(e);
     }
   }
 
@@ -104,121 +97,110 @@ export class SyncEngine {
   }
 
   public async initializeStorage(): Promise<void> {
-    const manifest = createEmptyManifest(this.config.machineId);
-    await this.backend.initialize(JSON.stringify(manifest, null, 2));
+    await this.backend.initialize(
+      JSON.stringify(createEmptyManifest(this.config.machineId), null, 2)
+    );
   }
 
   private hasStorageConfigured(): boolean {
     return Boolean(this.config.repoOwner && this.config.repoName);
   }
-
   private getStorageId(): string {
     return `${this.config.repoOwner ?? ''}/${this.config.repoName ?? ''}`;
   }
 
-  private async syncWithRetry(localData: CategoryData[], retryCount: number): Promise<SyncResult> {
+  private async syncWithRetry(data: CategoryData[], retry: number): Promise<SyncResult> {
     if (!this.hasStorageConfigured()) return buildErrorResult('No storage configured');
     try {
-      const remoteManifest = await fetchManifest(this.backend);
-      if (!remoteManifest) return await this.push(localData, retryCount);
-      const lockTimeout = this.config.advisoryLockTimeoutSeconds;
-      if (isLockedByOther(remoteManifest, this.config.machineId, lockTimeout)) await sleep(2000);
-      return await this.routeByClockComparison(localData, remoteManifest, retryCount);
-    } catch (error) {
-      return handleSyncError(error);
+      const m = await fetchManifest(this.backend);
+      if (!m) return await this.push(data, retry);
+      if (isLockedByOther(m, this.config.machineId, this.config.advisoryLockTimeoutSeconds))
+        await sleep(2000);
+      return await this.routeByClockComparison(data, m, retry);
+    } catch (e) {
+      return handleSyncError(e);
     }
   }
 
-  private async performSync(localData: CategoryData[]): Promise<SyncResult> {
-    const remoteManifest = await fetchManifest(this.backend);
-    if (!remoteManifest) return this.push(localData);
-    const lockTimeout = this.config.advisoryLockTimeoutSeconds;
-    if (isLockedByOther(remoteManifest, this.config.machineId, lockTimeout)) await sleep(2000);
-    return this.routeByClockComparison(localData, remoteManifest, 0);
+  private async performSync(data: CategoryData[]): Promise<SyncResult> {
+    const m = await fetchManifest(this.backend);
+    if (!m) return this.push(data);
+    if (isLockedByOther(m, this.config.machineId, this.config.advisoryLockTimeoutSeconds))
+      await sleep(2000);
+    return this.routeByClockComparison(data, m, 0);
   }
 
   private async routeByClockComparison(
-    localData: CategoryData[],
-    remoteManifest: Manifest,
-    retryCount: number
+    data: CategoryData[],
+    m: Manifest,
+    retry: number
   ): Promise<SyncResult> {
-    const comparison = compareVectorClocks(
-      this.localState?.vectorClock ?? {},
-      remoteManifest.vectorClock
-    );
-    switch (comparison) {
+    const cmp = compareVectorClocks(this.localState?.vectorClock ?? {}, m.vectorClock);
+    switch (cmp) {
       case 'equal':
-        if (needsPush(localData, remoteManifest.categories))
-          return this.push(localData, retryCount);
-        return buildNoChangeResult();
+        return needsPush(data, m) ? this.push(data, retry) : buildNoChangeResult();
       case 'local-ahead':
-        return this.push(localData, retryCount);
+        return this.push(data, retry, m);
       case 'remote-ahead':
-        return this.pull(remoteManifest);
+        return this.pull(m, data);
       case 'concurrent':
-        return this.handleConflict(localData, remoteManifest, retryCount);
+        return this.handleConflict(data, m, retry);
     }
   }
 
-  private async performPush(localData: CategoryData[]): Promise<SyncResult> {
-    const existingFilesList = await this.backend.listFiles();
-    const existingFilenames = existingFilesList.map((f) => f.filename);
-    const { files, manifest, changedCategories } = preparePushData(
-      localData,
-      this.config,
-      this.localState,
-      this.getCryptoOptions(),
-      existingFilenames
+  private async performPush(data: CategoryData[], remote?: Manifest): Promise<SyncResult> {
+    const existing = (await this.backend.listFiles()).map((f) => f.filename);
+    const opts = {
+      localData: data,
+      config: this.config,
+      localState: this.localState,
+      passphrase: buildCryptoOptions(this.passphrase, this.oldPassphrase),
+      existingFiles: existing,
+    };
+    const { files, manifest, changedCategories } = executePush(opts, remote);
+    await this.backend.updateFiles(
+      toStorageFiles(files, MANIFEST_FILENAME, JSON.stringify(manifest, null, 2))
     );
-    const storageFiles: Record<string, string | null> = {};
-    for (const [filename, fileData] of Object.entries(files))
-      storageFiles[filename] = fileData.content;
-    storageFiles[MANIFEST_FILENAME] = JSON.stringify(manifest, null, 2);
-    await this.backend.updateFiles(storageFiles);
-    this.localState = buildLocalState(
-      manifest,
-      localData,
-      this.getStorageId(),
-      this.config.machineId
-    );
+    this.localState = buildLocalState(manifest, data, this.getStorageId(), this.config.machineId);
     return buildPushResult(changedCategories);
   }
 
-  private async performPull(remoteManifest?: Manifest): Promise<SyncResult> {
-    const manifest = remoteManifest ?? (await fetchManifest(this.backend));
-    if (!manifest) return buildErrorResult('No remote data found');
-    const storageFiles = await getStorageFilesMap(this.backend);
-    const { pulledData, changedCategories } = await pullCategories(
-      manifest,
-      storageFiles,
-      this.config.sync,
-      this.getCryptoOptions(),
-      this.backend
+  private async performPull(remote?: Manifest, data?: CategoryData[]): Promise<SyncResult> {
+    const m = remote ?? (await fetchManifest(this.backend));
+    if (!m) return buildErrorResult('No remote data found');
+    const sf = await getStorageFilesMap(this.backend);
+    const opts = buildPullOptions(
+      {
+        manifest: m,
+        storageFiles: sf,
+        enabledCategories: this.config.sync,
+        passphrase: buildCryptoOptions(this.passphrase, this.oldPassphrase),
+        backend: this.backend,
+      },
+      data
     );
-    this.localState = buildLocalState(
-      manifest,
-      pulledData,
-      this.getStorageId(),
-      this.config.machineId
-    );
-    return buildPullResult(changedCategories);
+    const { pulledData, changedCategories, tombstonedItems } = await pullCategories(opts);
+    this.localState = buildLocalState(m, pulledData, this.getStorageId(), this.config.machineId);
+    // Convert tombstonedItems to item ID arrays for the result
+    const tombstoneIds = extractTombstoneIds(tombstonedItems);
+    return buildPullResult({ changedCategories, pulledData, tombstonedItems: tombstoneIds });
   }
 
   private async handleConflict(
-    localData: CategoryData[],
-    remoteManifest: Manifest,
-    retryCount: number
+    data: CategoryData[],
+    m: Manifest,
+    retry: number
   ): Promise<SyncResult> {
-    const storageFiles = await getStorageFilesMap(this.backend);
-    const { mergedData, conflicts } = await mergeAllCategories(localData, {
-      remoteManifest,
-      storageFiles,
+    const sf = await getStorageFilesMap(this.backend);
+    const ctx = {
+      remoteManifest: m,
+      storageFiles: sf,
       localState: this.localState,
-      passphrase: this.getCryptoOptions(),
+      passphrase: buildCryptoOptions(this.passphrase, this.oldPassphrase),
       machineId: this.config.machineId,
       backend: this.backend,
-    });
-    const result = await this.push(mergedData, retryCount);
-    return buildConflictResult(result, conflicts);
+    };
+    const { mergedData, conflicts } = await mergeAllCategories(data, ctx);
+    return buildConflictResult(await this.push(mergedData, retry, m), conflicts);
   }
 }
