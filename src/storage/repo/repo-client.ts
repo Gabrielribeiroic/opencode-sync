@@ -394,6 +394,14 @@ export class RepoStorageBackend implements StorageBackend {
       message,
       tree: treeSha,
       parents: [parentSha],
+      author: {
+        name: 'OpenCode Sync',
+        email: 'github-actions[bot]@users.noreply.github.com',
+      },
+      committer: {
+        name: 'OpenCode Sync',
+        email: 'github-actions[bot]@users.noreply.github.com',
+      },
     });
 
     const res = await this.fetch('/git/commits', { method: 'POST', body });
