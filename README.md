@@ -22,6 +22,8 @@ Add to your `opencode.json` config file:
 }
 ```
 
+Using an AI coding agent? See [LLM Installation Guide](docs/LLM-INSTALL.md) for step-by-step prompts.
+
 ## What Gets Synced
 
 | Category | Data | Default |
