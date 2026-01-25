@@ -14,7 +14,17 @@ Sync your OpenCode configuration, sessions, and data across multiple machines us
 
 ## Installation
 
-Add to your `opencode.json` config file:
+**Step 1:** Install the package in your OpenCode config directory:
+
+```bash
+# Linux/macOS
+cd ~/.config/opencode && npm install oc-sync
+
+# Windows (PowerShell)
+cd $HOME\.config\opencode; npm install oc-sync
+```
+
+**Step 2:** Register the plugin in `opencode.json` (in config directory):
 
 ```json
 {
@@ -22,7 +32,13 @@ Add to your `opencode.json` config file:
 }
 ```
 
+**Step 3:** Configure your GitHub token (see [Configuration](#configuration) below)
+
+**Step 4:** Restart OpenCode
+
 Using an AI coding agent? See [LLM Installation Guide](docs/LLM-INSTALL.md) for step-by-step prompts.
+
+> **Note:** OpenCode uses XDG paths on all platforms. See [Sync Paths](docs/SYNC-PATHS.md) for platform-specific locations.
 
 ## What Gets Synced
 

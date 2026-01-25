@@ -1,21 +1,50 @@
 # Configuration
 
+## Prerequisites
+
+The plugin must be installed in your OpenCode config directory:
+
+```bash
+# Linux/macOS
+cd ~/.config/opencode && npm install oc-sync
+
+# Windows (PowerShell)
+cd $HOME\.config\opencode; npm install oc-sync
+```
+
+And registered in `opencode.json` (in config directory):
+
+```json
+{
+  "plugin": ["oc-sync"]
+}
+```
+
+See [Sync Paths](SYNC-PATHS.md) for platform-specific directory locations.
+
 ## Quick Start
 
 1. Create a [GitHub Personal Access Token](https://github.com/settings/tokens) with `repo` scope
 2. Set environment variable:
 
 ```bash
+# Linux/macOS
 export GITHUB_TOKEN=ghp_your_token_here
+
+# Windows (PowerShell)
+$env:GITHUB_TOKEN = "ghp_your_token_here"
 ```
 
 3. Start OpenCode - the plugin automatically creates a private repo for sync storage
 
-Add to your shell profile (`~/.bashrc`, `~/.zshrc`) for persistence.
+Add to your shell profile for persistence:
+- Linux: `~/.bashrc` or `~/.zshrc`
+- macOS: `~/.zshrc`
+- Windows: Use System Environment Variables or PowerShell profile
 
 ## Alternative: Config File
 
-Instead of environment variable, create `~/.config/opencode/opencode-sync.json`:
+Instead of environment variable, create `opencode-sync.json` in the config directory:
 
 ```json
 {

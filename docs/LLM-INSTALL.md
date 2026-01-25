@@ -15,10 +15,42 @@ Ask the user:
 2. "Do you have a GitHub account?" - If no, guide them to create one at https://github.com
 
 ### Step 1: Install the Package
-Run this command:
-npm install oc-sync
+IMPORTANT: The package must be installed in the OpenCode config directory, NOT globally.
 
-### Step 2: Generate GitHub Personal Access Token
+Determine the user's OS and run the appropriate command:
+
+**Linux/macOS:**
+cd ~/.config/opencode && npm install oc-sync
+
+**Windows (PowerShell):**
+cd $HOME\.config\opencode; npm install oc-sync
+
+**Windows (Command Prompt):**
+cd %USERPROFILE%\.config\opencode && npm install oc-sync
+
+This installs the plugin where OpenCode can find it (in the config directory's node_modules/).
+
+NOTE: OpenCode uses XDG paths on ALL platforms. On Windows, this is NOT %APPDATA% - it's %USERPROFILE%\.config\opencode\.
+
+### Step 2: Register the Plugin
+IMPORTANT: Installing the package is NOT enough. You must also register it.
+
+Edit the opencode.json file in the config directory:
+
+**Linux/macOS:** ~/.config/opencode/opencode.json
+**Windows:** %USERPROFILE%\.config\opencode\opencode.json
+
+Add the plugin array:
+
+{
+  "plugin": ["oc-sync"]
+}
+
+NOTE: The key is "plugin" (singular), NOT "plugins" (plural).
+
+If opencode.json already exists with other settings, just add "oc-sync" to the existing plugin array.
+
+### Step 3: Generate GitHub Personal Access Token
 Guide the user step by step:
 1. Go to https://github.com/settings/tokens
 2. Click "Generate new token (classic)"
@@ -29,11 +61,14 @@ Guide the user step by step:
 7. IMPORTANT: Tell user to copy the token immediately (starts with "ghp_")
 8. Ask user: "Please paste your token here" - Save this as TOKEN
 
-### Step 3: Create Configuration
-Create the config file at ~/.config/opencode/opencode-sync.json:
+### Step 4: Create Token Configuration
+Create the config file opencode-sync.json in the config directory:
+
+**Linux/macOS:** ~/.config/opencode/opencode-sync.json
+**Windows:** %USERPROFILE%\.config\opencode\opencode-sync.json
 
 {
-  "token": "<TOKEN from Step 2>"
+  "token": "<TOKEN from Step 3>"
 }
 
 That's it! The plugin will automatically:
@@ -41,14 +76,16 @@ That's it! The plugin will automatically:
 - Create a private repository (.opencode-sync)
 - Detect the default branch (main/master)
 
-### Step 4: Verify Installation
+### Step 5: Verify Installation
 Tell user to restart OpenCode. The plugin will:
 - Auto-create the sync repository if needed
 - Sync on startup
 - Watch for file changes
 - Push/pull automatically
 
-Check logs at: ~/.local/share/opencode/log/opencode-sync.log
+Check logs at:
+**Linux/macOS:** ~/.local/share/opencode/log/opencode-sync.log
+**Windows:** %USERPROFILE%\.local\share\opencode\log\opencode-sync.log
 
 Expected output:
 [opencode-sync] Plugin starting...
@@ -58,7 +95,15 @@ Expected output:
 [opencode-sync] Plugin ready
 
 ### Troubleshooting
-If user reports errors:
+
+#### Plugin not loading (no log output)
+- Check plugin is installed in correct location:
+  - Linux/macOS: ls ~/.config/opencode/node_modules/oc-sync
+  - Windows: dir %USERPROFILE%\.config\opencode\node_modules\oc-sync
+- Check plugin is registered in opencode.json with "plugin" (singular) key
+- Check opencode.json is valid JSON (no trailing commas, etc.)
+
+#### API Errors
 - "401 Unauthorized": Token is invalid or expired. Generate a new one.
 - "403 Forbidden": Token lacks "repo" scope. Recreate with correct permissions.
 - "Not Found": Check token has repo scope for creating private repositories.
