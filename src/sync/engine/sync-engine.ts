@@ -21,6 +21,7 @@ import {
   executeConflictOperation,
   type PushContext,
 } from './operations.js';
+import { pullThenPush } from './pull-push.js';
 
 export { type CategoryData };
 
@@ -85,26 +86,22 @@ export class SyncEngine {
   }
 
   public async initializeStorage(): Promise<void> {
-    await this.backend.initialize(
-      JSON.stringify(createEmptyManifest(this.config.machineId), null, 2)
-    );
+    const manifest = createEmptyManifest(this.config.machineId);
+    await this.backend.initialize(JSON.stringify(manifest, null, 2));
   }
 
   private hasStorageConfigured(): boolean {
     return Boolean(this.config.repoOwner && this.config.repoName);
   }
 
-  private getStorageId(): string {
-    return `${this.config.repoOwner ?? ''}/${this.config.repoName ?? ''}`;
-  }
-
   private getOperationContext(): PushContext {
+    const storageId = `${this.config.repoOwner ?? ''}/${this.config.repoName ?? ''}`;
     return {
       backend: this.backend,
       config: this.config,
       passphrase: this.passphrase,
       oldPassphrase: this.oldPassphrase,
-      getStorageId: () => this.getStorageId(),
+      getStorageId: () => storageId,
       localState: this.localState,
     };
   }
@@ -139,53 +136,45 @@ export class SyncEngine {
     const route = determineAction(this.localState, m, d);
     return executeRoute(route, {
       push: () => this.push(d, r, m),
-      pull: () => this.pullThenPush(m, d, r),
+      pull: () => this.doPullThenPush(m, d, r),
       conflict: () => this.handleConflict(d, m, r),
     });
   }
 
-  /** Pull remote changes, then push local changes if needed */
-  private async pullThenPush(
+  private async doPullThenPush(
     manifest: Manifest,
     data: CategoryData[],
     retry: number
   ): Promise<SyncResult> {
-    // First pull remote changes
-    const pullResult = await this.performPull(manifest, data);
-    if (!pullResult.success) return pullResult;
-
-    // After pull, check if local data still needs pushing
-    // Re-fetch manifest to get updated state after pull wrote new state
-    const newManifest = await fetchManifest(this.backend);
-    if (!newManifest) return pullResult;
-
-    // Check if local has changes that need pushing
-    const { needsPush } = await import('../operations/push.js');
-    if (needsPush(data, newManifest)) {
-      syncLog('[SYNC] Local has changes after pull, pushing...');
-      const pushResult = await this.push(data, retry, newManifest);
-      // Combine results - report both pull and push
-      return {
-        ...pushResult,
-        action: 'merged',
-        message: `Pulled then pushed: ${pullResult.message}, ${pushResult.message}`,
-      };
-    }
-
-    return pullResult;
+    return pullThenPush(
+      {
+        backend: this.backend,
+        performPull: (m, d) => this.performPull(m, d),
+        push: (d, r, m) => this.push(d, r, m),
+      },
+      manifest,
+      data,
+      retry
+    );
   }
 
   private async performPush(data: CategoryData[], remote?: Manifest): Promise<SyncResult> {
-    const ctx = this.getOperationContext();
-    const { result, newState } = await executePushOperation(ctx, data, remote);
+    const { result, newState } = await executePushOperation(
+      this.getOperationContext(),
+      data,
+      remote
+    );
     this.localState = newState;
     return result;
   }
 
   private async performPull(remote?: Manifest, data?: CategoryData[]): Promise<SyncResult> {
     const m = remote ?? (await fetchManifest(this.backend));
-    const ctx = this.getOperationContext();
-    const { result, newState } = await executePullOperation(ctx, m ?? undefined, data);
+    const { result, newState } = await executePullOperation(
+      this.getOperationContext(),
+      m ?? undefined,
+      data
+    );
     if (newState) this.localState = newState;
     return result;
   }

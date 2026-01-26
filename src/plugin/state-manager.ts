@@ -5,9 +5,12 @@
  */
 
 import type { PathConfig } from '../types/paths.js';
-import { DEFAULT_CONFIG, type SyncConfig, type SyncCategory } from '../types/index.js';
-import { SyncEngine, type SyncEngineOptions } from '../sync/engine/index.js';
-import { RepoStorageBackend, type RepoClientConfig } from '../storage/index.js';
+import type { SyncConfig, SyncCategory } from '../types/index.js';
+import { DEFAULT_CONFIG } from '../types/index.js';
+import type { SyncEngineOptions } from '../sync/engine/index.js';
+import { SyncEngine } from '../sync/engine/index.js';
+import type { RepoClientConfig } from '../storage/index.js';
+import { RepoStorageBackend } from '../storage/index.js';
 import { createFileWatcher } from '../sync/watcher/index.js';
 import { loadConfig, saveConfig, loadLocalState, generateMachineId } from '../data/index.js';
 import type { PluginState } from './types.js';

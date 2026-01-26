@@ -4,12 +4,14 @@
  * Persists and loads local sync state and configuration.
  */
 
-import { readFile, writeFile, mkdir, rename, unlink } from 'node:fs/promises';
+import { readFile } from 'node:fs/promises';
 import { randomUUID } from 'node:crypto';
 import { hostname } from 'node:os';
-import { dirname } from 'node:path';
 import type { SyncConfig, LocalSyncState, PathConfig } from '../types/index.js';
 import { DEFAULT_CONFIG } from '../types/index.js';
+import type { RawConfig } from './config-migration.js';
+import { migrateConfig, configsEqual } from './config-migration.js';
+import { atomicWriteFile } from './file-io.js';
 
 /** Environment variable name for GitHub token */
 const ENV_TOKEN_KEY = 'GITHUB_TOKEN';
@@ -24,11 +26,11 @@ const ENV_TOKEN_KEY = 'GITHUB_TOKEN';
  * 3. null (no token available)
  */
 export async function loadConfig(pathConfig: PathConfig): Promise<SyncConfig | null> {
-  let rawConfig: Record<string, unknown> | null = null;
+  let rawConfig: RawConfig | null = null;
 
   try {
     const content = await readFile(pathConfig.pluginConfigPath, 'utf-8');
-    rawConfig = JSON.parse(content) as Record<string, unknown>;
+    rawConfig = JSON.parse(content) as RawConfig;
   } catch {
     // Config file doesn't exist or is invalid - will try env var
   }
@@ -36,7 +38,6 @@ export async function loadConfig(pathConfig: PathConfig): Promise<SyncConfig | n
   const envToken = process.env[ENV_TOKEN_KEY];
 
   if (rawConfig) {
-    // Migrate config: use defaults, keep user values, remove obsolete keys
     const migratedConfig = migrateConfig(rawConfig);
 
     if (!migratedConfig.token && envToken) {
@@ -46,7 +47,6 @@ export async function loadConfig(pathConfig: PathConfig): Promise<SyncConfig | n
       migratedConfig.machineId = generateMachineId();
     }
 
-    // Save migrated config if it changed
     const configChanged = !configsEqual(rawConfig, migratedConfig as unknown as RawConfig);
     if (configChanged) {
       await saveConfig(pathConfig, migratedConfig);
@@ -65,86 +65,6 @@ export async function loadConfig(pathConfig: PathConfig): Promise<SyncConfig | n
   }
 
   return null;
-}
-
-/** Raw config from disk (untyped) */
-type RawConfig = Record<string, unknown>;
-
-/** Keys that are user-specific and should always be preserved */
-const USER_KEYS = [
-  'token',
-  'machineId',
-  'repoOwner',
-  'repoName',
-  'branch',
-  'keySalt',
-  'passphraseHash',
-  'oldEncryptionKey',
-] as const;
-
-/**
- * Migrate config to latest schema.
- * - Adds missing keys from DEFAULT_CONFIG
- * - Removes keys not in DEFAULT_CONFIG (except user-specific keys)
- * - Preserves user values for existing keys
- */
-function migrateConfig(raw: RawConfig): SyncConfig {
-  // Start with defaults
-  const migrated: RawConfig = { ...DEFAULT_CONFIG };
-
-  // Copy user-specific keys
-  for (const key of USER_KEYS) {
-    if (key in raw) {
-      migrated[key] = raw[key];
-    }
-  }
-
-  // For config keys in DEFAULT_CONFIG, use user value if present
-  for (const key of Object.keys(DEFAULT_CONFIG)) {
-    if (!(key in raw)) continue;
-    if (key === 'sync') {
-      migrated['sync'] = migrateSyncCategories(raw['sync'] as RawConfig | undefined);
-    } else {
-      migrated[key] = raw[key];
-    }
-  }
-
-  return migrated as unknown as SyncConfig;
-}
-
-/**
- * Migrate sync categories: merge with defaults, remove obsolete keys.
- */
-function migrateSyncCategories(rawSync: RawConfig | undefined): RawConfig {
-  const merged: RawConfig = { ...DEFAULT_CONFIG.sync, ...rawSync };
-  const validKeys = new Set(Object.keys(DEFAULT_CONFIG.sync));
-  const result: RawConfig = {};
-  for (const key of Object.keys(merged)) {
-    if (validKeys.has(key)) {
-      result[key] = merged[key];
-    }
-  }
-  return result;
-}
-
-/**
- * Check if migration actually changed config values (ignoring key order).
- * Only compares keys that exist in DEFAULT_CONFIG + USER_KEYS.
- */
-function configsEqual(raw: RawConfig, migrated: RawConfig): boolean {
-  const allKeys = [...Object.keys(DEFAULT_CONFIG), ...USER_KEYS];
-  for (const key of allKeys) {
-    const rawVal = raw[key];
-    const migVal = migrated[key];
-    if (rawVal === undefined && migVal === undefined) continue;
-    if (rawVal === undefined || migVal === undefined) return false;
-    if (JSON.stringify(rawVal) !== JSON.stringify(migVal)) return false;
-  }
-  // Check if raw has extra keys that will be removed
-  for (const key of Object.keys(raw)) {
-    if (!(key in migrated)) return false;
-  }
-  return true;
 }
 
 /**
@@ -214,33 +134,4 @@ export function createInitialConfig(token: string, defaults: typeof DEFAULT_CONF
     token,
     machineId: generateMachineId(),
   };
-}
-
-/**
- * Ensure directory exists.
- */
-async function ensureDir(dirPath: string): Promise<void> {
-  await mkdir(dirPath, { recursive: true });
-}
-
-/**
- * Atomically write a file using write-to-temp-then-rename pattern.
- * This prevents partial writes from corrupting files when multiple
- * processes write simultaneously.
- */
-async function atomicWriteFile(filePath: string, content: string): Promise<void> {
-  const tempPath = `${filePath}.${String(process.pid)}.tmp`;
-  await ensureDir(dirname(filePath));
-  try {
-    await writeFile(tempPath, content, 'utf-8');
-    await rename(tempPath, filePath);
-  } catch (error) {
-    // Clean up temp file on error
-    try {
-      await unlink(tempPath);
-    } catch {
-      // Ignore cleanup errors
-    }
-    throw error;
-  }
 }

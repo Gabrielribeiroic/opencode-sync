@@ -2,16 +2,23 @@
   "name": "oc-sync",
   "version": "0.1.18",
   "description": "Sync OpenCode data across machines using a private GitHub repository with vector clock conflict resolution",
-  "main": "dist/index.js",
-  "types": "dist/index.d.ts",
   "type": "module",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
   "files": [
     "dist"
   ],
+  "sideEffects": false,
   "scripts": {
     "build": "tsc",
     "dev": "tsc --watch",
-    "clean": "rm -rf dist",
+    "clean": "shx rm -rf dist",
     "lint": "eslint \"src/**/*.ts\"",
     "lint:fix": "eslint \"src/**/*.ts\" --fix",
     "format": "prettier --write \"src/**/*.ts\"",
@@ -52,6 +59,7 @@
     "husky": "^9.1.7",
     "lint-staged": "^16.2.7",
     "prettier": "^3.2.0",
+    "shx": "^0.3.4",
     "typescript": "^5.0.0",
     "typescript-eslint": "^8.0.0"
   },
@@ -61,5 +69,8 @@
   "repository": {
     "type": "git",
     "url": "https://github.com/ErcinDedeoglu/opencode-sync"
+  },
+  "publishConfig": {
+    "access": "public"
   }
 }

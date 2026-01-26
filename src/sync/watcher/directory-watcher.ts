@@ -4,7 +4,8 @@
  * Low-level directory and file watching logic.
  */
 
-import { watch, type FSWatcher, type WatchEventType } from 'node:fs';
+import type { FSWatcher, WatchEventType } from 'node:fs';
+import { watch } from 'node:fs';
 import { stat } from 'node:fs/promises';
 import { join } from 'node:path';
 import type { SyncCategory, WatcherEvent } from './types.js';
