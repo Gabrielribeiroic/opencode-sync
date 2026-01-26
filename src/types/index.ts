@@ -53,3 +53,6 @@ export { getPathConfig, getCategoryPaths, getCategoryForPath } from './paths.js'
 
 // Logger
 export type { LogLevel, LogCategory, Logger } from './logger.js';
+
+// Crypto
+export type { CryptoOptions, PassphraseOption } from './crypto.js';

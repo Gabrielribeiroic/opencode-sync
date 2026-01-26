@@ -8,8 +8,13 @@
  */
 
 import * as pako from 'pako';
-import { createHash } from 'node:crypto';
 import type { PackedChunk, PackedCategory, SyncCategory } from '../types/index.js';
+import {
+  calculateChecksum,
+  uint8ArrayToBase64,
+  base64ToUint8Array,
+  PackerError,
+} from '../shared/index.js';
 
 /** Maximum chunk size in bytes (800KB) */
 const MAX_CHUNK_SIZE = 800 * 1024;
@@ -63,13 +68,6 @@ export function unpackCategory(chunks: PackedChunk[], expectedChecksum?: string)
   }
 
   return decompressed;
-}
-
-/**
- * Calculate SHA-256 checksum of data.
- */
-export function calculateChecksum(data: string): string {
-  return createHash('sha256').update(data, 'utf8').digest('hex');
 }
 
 /**
@@ -135,20 +133,6 @@ function combineChunks(chunks: PackedChunk[]): Uint8Array {
 }
 
 /**
- * Convert Uint8Array to base64 string.
- */
-export function uint8ArrayToBase64(data: Uint8Array): string {
-  return Buffer.from(data).toString('base64');
-}
-
-/**
- * Convert base64 string to Uint8Array.
- */
-export function base64ToUint8Array(base64: string): Uint8Array {
-  return new Uint8Array(Buffer.from(base64, 'base64'));
-}
-
-/**
  * Compress a string with gzip and return base64.
  */
 export function compress(data: string): string {
@@ -164,12 +148,10 @@ export function decompress(base64Data: string): string {
   return pako.ungzip(compressed, { to: 'string' });
 }
 
-/**
- * Error thrown when packing/unpacking fails.
- */
-export class PackerError extends Error {
-  constructor(message: string) {
-    super(message);
-    this.name = 'PackerError';
-  }
-}
+// Re-export for backward compatibility
+export {
+  calculateChecksum,
+  uint8ArrayToBase64,
+  base64ToUint8Array,
+  PackerError,
+} from '../shared/index.js';

@@ -6,15 +6,10 @@
 
 import type { PathConfig } from '../types/paths.js';
 import type { SyncResult } from '../types/index.js';
-import type { CategoryData } from '../sync/operations/types.js';
-import {
-  loadLocalData,
-  saveLocalState,
-  writeLocalData,
-  deleteTombstonedItems,
-} from '../data/index.js';
+import { loadLocalData } from '../data/index.js';
 import { getPluginState } from './state-manager.js';
-import { syncLog } from '../logging/index.js';
+import { isPluginReady } from './validation.js';
+import { getErrorMessage, writePulledData, persistLocalState } from '../shared/index.js';
 
 type LogLevel = 'error' | 'info' | 'debug' | 'warn';
 
@@ -32,7 +27,7 @@ interface LogClient {
 export async function performSync(pathConfig: PathConfig, client: LogClient): Promise<void> {
   const state = getPluginState();
 
-  if (!state.config || !state.engine) {
+  if (!isPluginReady(state)) {
     return;
   }
 
@@ -46,7 +41,7 @@ export async function performSync(pathConfig: PathConfig, client: LogClient): Pr
       await logSyncError(client, result.message);
     }
   } catch (error) {
-    await logSyncError(client, error instanceof Error ? error.message : 'Unknown');
+    await logSyncError(client, getErrorMessage(error));
   }
 }
 
@@ -58,32 +53,9 @@ async function handleSyncSuccess(
   client: LogClient,
   result: SyncResult
 ): Promise<void> {
-  const state = getPluginState();
-  const newState = state.engine?.getLocalState();
-
-  // Write pulled data to local filesystem
-  // This includes data from pull, merge, AND remote items fetched during push
-  if (result.action === 'pulled' || result.action === 'merged' || result.action === 'pushed') {
-    syncLog(
-      `[WRITE] Action: ${result.action}, pulledData: ${result.pulledData ? 'present' : 'missing'}`
-    );
-    if (result.pulledData) {
-      const data = result.pulledData as CategoryData[];
-      syncLog(`[WRITE] Writing ${String(data.length)} categories to disk`);
-      await writeLocalData(pathConfig, data);
-      syncLog(`[WRITE] Finished writing to disk`);
-    }
-    if (result.tombstonedItems) {
-      await deleteTombstonedItems(pathConfig, result.tombstonedItems);
-    }
-  } else {
-    syncLog(`[WRITE] Skipping write - action: ${result.action}`);
-  }
-
-  if (newState) {
-    await saveLocalState(pathConfig, newState);
-    state.localState = newState;
-  }
+  // Write pulled data and persist state using shared utilities
+  await writePulledData(pathConfig, result);
+  await persistLocalState(pathConfig);
 
   await client.app.log({
     body: {

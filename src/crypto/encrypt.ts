@@ -7,6 +7,7 @@
 
 import { createCipheriv, createDecipheriv, pbkdf2Sync, randomBytes, createHash } from 'node:crypto';
 import type { EncryptedData } from '../types/index.js';
+import { EncryptionError } from '../shared/index.js';
 
 /** PBKDF2 iterations for key derivation */
 const PBKDF2_ITERATIONS = 100000;
@@ -124,12 +125,5 @@ export function isEncryptedData(data: unknown): data is EncryptedData {
   );
 }
 
-/**
- * Error thrown when encryption/decryption fails.
- */
-export class EncryptionError extends Error {
-  constructor(message: string) {
-    super(message);
-    this.name = 'EncryptionError';
-  }
-}
+// Re-export for backward compatibility
+export { EncryptionError } from '../shared/index.js';

@@ -1,18 +1,7 @@
 /**
  * Sync Engine Errors
  *
- * Custom error classes for sync operations.
+ * Re-exports error classes from shared module for backward compatibility.
  */
 
-/**
- * Error thrown when sync operation fails.
- */
-export class SyncError extends Error {
-  constructor(
-    message: string,
-    public readonly code: string
-  ) {
-    super(message);
-    this.name = 'SyncError';
-  }
-}
+export { SyncError } from '../../shared/index.js';

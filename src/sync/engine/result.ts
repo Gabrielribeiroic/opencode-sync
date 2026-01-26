@@ -5,6 +5,7 @@
  */
 
 import type { SyncResult, ConflictInfo, SyncCategory } from '../../types/index.js';
+import { getErrorMessage, toError } from '../../shared/index.js';
 
 /** Options for building push result */
 export interface BuildPushResultOptions {
@@ -106,8 +107,5 @@ export function buildSkippedResult(reason: string): SyncResult {
  * Convert an unknown error to SyncResult.
  */
 export function handleSyncError(error: unknown): SyncResult {
-  return buildErrorResult(
-    error instanceof Error ? error.message : 'Operation failed',
-    error instanceof Error ? error : new Error(String(error))
-  );
+  return buildErrorResult(getErrorMessage(error), toError(error));
 }

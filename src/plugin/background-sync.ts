@@ -5,16 +5,12 @@
 import type { PathConfig } from '../types/paths.js';
 import type { SyncCategory } from '../types/index.js';
 import type { SyncResult } from '../types/sync.js';
-import type { CategoryData } from '../sync/operations/types.js';
-import {
-  loadLocalData,
-  saveLocalState,
-  writeLocalData,
-  deleteTombstonedItems,
-} from '../data/index.js';
+import { loadLocalData } from '../data/index.js';
 import { FileWatcher } from '../sync/watcher/index.js';
-import { syncLog, log } from '../logging/index.js';
+import { log } from '../logging/index.js';
 import { getPluginState } from './state-manager.js';
+import { isContinuousSyncReady } from './validation.js';
+import { getErrorMessage, writePulledData, persistLocalState } from '../shared/index.js';
 
 /** Active file watcher instance */
 let activeWatcher: FileWatcher | null = null;
@@ -22,39 +18,11 @@ let activeWatcher: FileWatcher | null = null;
 /** Active interval timer for periodic sync */
 let syncInterval: NodeJS.Timeout | null = null;
 
-/** Write pulled data to disk after a successful pull/merge */
-export async function writePulledData(pathConfig: PathConfig, result: SyncResult): Promise<void> {
-  if (result.action !== 'pulled' && result.action !== 'merged') {
-    return;
-  }
-
-  if (result.pulledData) {
-    const data = result.pulledData as CategoryData[];
-    syncLog(`[WRITE] Writing ${String(data.length)} categories to disk`);
-    await writeLocalData(pathConfig, data);
-    syncLog(`[WRITE] Finished writing to disk`);
-  }
-
-  if (result.tombstonedItems) {
-    await deleteTombstonedItems(pathConfig, result.tombstonedItems);
-  }
-}
-
-/** Persist engine's local state to disk after successful sync */
-export async function persistLocalState(pathConfig: PathConfig): Promise<void> {
-  const state = getPluginState();
-  const newState = state.engine?.getLocalState();
-  if (newState) {
-    await saveLocalState(pathConfig, newState);
-    state.localState = newState;
-  }
-}
-
 /** Start file watcher for continuous sync */
 export function startFileWatcher(pathConfig: PathConfig): void {
   const state = getPluginState();
 
-  if (!state.config?.continuousSync || !state.engine) {
+  if (!isContinuousSyncReady(state)) {
     return;
   }
 
@@ -81,16 +49,14 @@ export function startFileWatcher(pathConfig: PathConfig): void {
             await persistLocalState(pathConfig);
           }
         } catch (error) {
-          const errMsg = error instanceof Error ? error.message : String(error);
-          log(`WARNING: File watcher sync failed: ${errMsg}`);
+          log(`WARNING: File watcher sync failed: ${getErrorMessage(error)}`);
         }
       },
     });
     void activeWatcher.start();
     log('File watcher started');
   } catch (error) {
-    const errMsg = error instanceof Error ? error.message : String(error);
-    log(`WARNING: Failed to start file watcher: ${errMsg}`);
+    log(`WARNING: Failed to start file watcher: ${getErrorMessage(error)}`);
   }
 }
 
@@ -98,7 +64,7 @@ export function startFileWatcher(pathConfig: PathConfig): void {
 export function startIntervalSync(pathConfig: PathConfig): void {
   const state = getPluginState();
 
-  if (!state.config?.continuousSync || !state.engine) {
+  if (!isContinuousSyncReady(state)) {
     return;
   }
 
@@ -117,8 +83,7 @@ export function startIntervalSync(pathConfig: PathConfig): void {
         }
         logIntervalResult(result);
       } catch (error) {
-        const errMsg = error instanceof Error ? error.message : String(error);
-        log(`WARNING: Interval sync failed: ${errMsg}`);
+        log(`WARNING: Interval sync failed: ${getErrorMessage(error)}`);
       }
     })();
   }, intervalMs);
@@ -151,3 +116,6 @@ export function stopBackgroundSync(): void {
     log('Interval sync stopped');
   }
 }
+
+// Re-export for backward compatibility
+export { writePulledData, persistLocalState } from '../shared/index.js';

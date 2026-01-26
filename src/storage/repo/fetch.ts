@@ -3,9 +3,7 @@
  */
 
 import { RepoApiError, RepoRateLimitError } from './errors.js';
-
-/** Default timeout for API requests (30 seconds) */
-const DEFAULT_TIMEOUT_MS = 30000;
+import { API_RETRY, sleep } from '../../shared/index.js';
 
 /**
  * Fetch with exponential backoff retry and timeout.
@@ -16,7 +14,7 @@ export async function fetchWithRetry(
   options: RequestInit,
   maxRetries: number,
   retryDelayMs: number,
-  timeoutMs: number = DEFAULT_TIMEOUT_MS
+  timeoutMs: number = API_RETRY.timeoutMs
 ): Promise<Response> {
   let lastError: Error | undefined;
 
@@ -27,9 +25,12 @@ export async function fetchWithRetry(
     lastError = result.error;
 
     if (attempt < maxRetries) {
-      // For rate limit errors, wait until reset time (max 60s)
+      // For rate limit errors, wait until reset time
       if (lastError instanceof RepoRateLimitError) {
-        const waitTime = Math.min(lastError.resetTimestamp * 1000 - Date.now(), 60000);
+        const waitTime = Math.min(
+          lastError.resetTimestamp * 1000 - Date.now(),
+          API_RETRY.maxRateLimitWaitMs
+        );
         if (waitTime > 0) await sleep(waitTime);
       } else {
         const delay = retryDelayMs * Math.pow(2, attempt);
@@ -124,8 +125,4 @@ async function createApiError(response: Response): Promise<RepoApiError> {
 function isNonRetryableError(error: Error): boolean {
   if (!(error instanceof RepoApiError)) return false;
   return error.status >= 400 && error.status < 500 && error.status !== 429;
-}
-
-function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
 }

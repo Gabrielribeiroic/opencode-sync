@@ -6,9 +6,14 @@
  */
 
 import * as pako from 'pako';
-import { createHash } from 'node:crypto';
 import type { SyncCategory, ItemInfo } from '../types/index.js';
 import { getItemFilename } from './item-filename.js';
+import {
+  calculateChecksum,
+  uint8ArrayToBase64,
+  base64ToUint8Array,
+  ItemPackerError,
+} from '../shared/index.js';
 
 /** Result of packing a single item */
 export interface PackedItem {
@@ -81,13 +86,6 @@ export function unpackItem(
 }
 
 /**
- * Calculate SHA-256 checksum of data.
- */
-export function calculateChecksum(data: string): string {
-  return createHash('sha256').update(data, 'utf8').digest('hex');
-}
-
-/**
  * Build ItemInfo for manifest.
  */
 export function buildItemInfo(packed: PackedItem, machineId: string): ItemInfo {
@@ -100,30 +98,7 @@ export function buildItemInfo(packed: PackedItem, machineId: string): ItemInfo {
   };
 }
 
-/**
- * Convert Uint8Array to base64 string.
- */
-function uint8ArrayToBase64(data: Uint8Array): string {
-  return Buffer.from(data).toString('base64');
-}
-
-/**
- * Convert base64 string to Uint8Array.
- */
-function base64ToUint8Array(base64: string): Uint8Array {
-  return new Uint8Array(Buffer.from(base64, 'base64'));
-}
-
-/**
- * Error thrown when item packing/unpacking fails.
- */
-export class ItemPackerError extends Error {
-  constructor(message: string) {
-    super(message);
-    this.name = 'ItemPackerError';
-  }
-}
-
-// Re-export filename and diff utilities for backward compatibility
+// Re-export for backward compatibility
 export { getItemFilename, getItemIdFromFilename } from './item-filename.js';
 export { diffItems, type ItemDiff } from './item-diff.js';
+export { calculateChecksum, ItemPackerError } from '../shared/index.js';

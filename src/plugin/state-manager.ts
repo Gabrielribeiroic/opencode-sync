@@ -15,6 +15,7 @@ import { createFileWatcher } from '../sync/watcher/index.js';
 import { loadConfig, saveConfig, loadLocalState, generateMachineId } from '../data/index.js';
 import type { PluginState } from './types.js';
 import { createInitialState } from './types.js';
+import { hasConfig } from './validation.js';
 
 const state: PluginState = createInitialState();
 
@@ -38,7 +39,7 @@ export function getPluginState(): PluginState {
  * Initialize the sync engine with current configuration.
  */
 export function initializeEngine(): void {
-  if (!state.config) return;
+  if (!hasConfig(state)) return;
   if (!state.config.repoOwner || !state.config.repoName) return;
 
   const backendConfig: RepoClientConfig = {
@@ -86,7 +87,7 @@ export async function updateConfig(
     return;
   }
 
-  if (!state.config) {
+  if (!hasConfig(state)) {
     state.config = {
       ...DEFAULT_CONFIG,
       token: updates.token ?? '',
@@ -106,7 +107,7 @@ export async function updateConfig(
  */
 export function setPassphrase(passphrase: string): void {
   state.passphrase = passphrase;
-  if (state.config) {
+  if (hasConfig(state)) {
     initializeEngine();
   }
 }
@@ -118,7 +119,7 @@ export async function startWatcher(
   pathConfig: PathConfig,
   onSync: () => Promise<void>
 ): Promise<void> {
-  if (!state.config?.continuousSync) return;
+  if (!hasConfig(state) || !state.config.continuousSync) return;
 
   state.watcher = createFileWatcher(
     pathConfig,

@@ -12,6 +12,7 @@ import type {
   SyncConfig,
   PackedChunk,
   Tombstone,
+  PassphraseOption,
 } from '../../types/index.js';
 
 /**
@@ -35,16 +36,8 @@ export type CategoryData = ItemCategoryData;
 /** Storage files structure (backend-agnostic) */
 export type StorageFiles = Record<string, { content?: string; sha?: string }>;
 
-/** Options for encryption/decryption with key rotation support */
-export interface CryptoOptions {
-  /** Current encryption key */
-  passphrase?: string;
-  /** Previous encryption key for decryption fallback during key rotation */
-  oldPassphrase?: string;
-}
-
-/** Passphrase can be a string (legacy) or CryptoOptions (with key rotation support) */
-export type PassphraseOption = string | CryptoOptions | undefined;
+// Re-export crypto types for backward compatibility
+export type { CryptoOptions, PassphraseOption } from '../../types/index.js';
 
 export interface OperationContext {
   config: SyncConfig;

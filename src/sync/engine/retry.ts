@@ -6,21 +6,20 @@
 
 import type { SyncResult } from '../../types/index.js';
 import { buildErrorResult } from './result.js';
+import {
+  CONFLICT_RETRY,
+  calculateBackoff as sharedCalculateBackoff,
+  sleep as sharedSleep,
+} from '../../shared/index.js';
 
 /** Maximum retry attempts for conflict resolution */
-export const MAX_CONFLICT_RETRIES = 5;
-
-/** Maximum backoff delay in milliseconds */
-const MAX_BACKOFF_MS = 10000;
-
-/** Base delay for exponential backoff */
-const BASE_DELAY_MS = 1000;
+export const MAX_CONFLICT_RETRIES = CONFLICT_RETRY.maxRetries;
 
 /**
  * Calculate exponential backoff delay.
  */
 export function calculateBackoff(retryCount: number): number {
-  return Math.min(BASE_DELAY_MS * Math.pow(2, retryCount), MAX_BACKOFF_MS);
+  return sharedCalculateBackoff(retryCount);
 }
 
 /**
@@ -37,5 +36,5 @@ export function checkMaxRetries(retryCount: number): SyncResult | null {
  * Sleep for given milliseconds.
  */
 export function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
+  return sharedSleep(ms);
 }

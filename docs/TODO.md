@@ -19,6 +19,33 @@
 - [x] Tombstones for deletion tracking
 - [x] Per-file granularity (not repo-level overwrite)
 - [x] Pull-then-push flow (when remote is newer, pull first then push local changes)
+- [x] Consolidate logger files - unified logging system with ports & adapters pattern
+
+## In Progress: Code Quality & Refactoring
+
+### High Priority
+- [x] **Consolidate encoding utilities** - `packer.ts` & `item-packer.ts` have identical `calculateChecksum()`, `uint8ArrayToBase64()`, `base64ToUint8Array()`
+  - Created `src/shared/encoding-utils.ts` with shared encoding functions
+- [x] **Extract error handling pattern** - pattern `error instanceof Error ? error.message : String(error)` repeated in 5+ files
+  - Created `src/shared/error-utils.ts` with `getErrorMessage()`, `getErrorStack()`, `toError()`, `isError()`
+- [x] **Consolidate sync result processing** - `background-sync.ts` & `sync-handler.ts` have duplicate write/persist logic
+  - Created `src/shared/sync-result-handler.ts` with `writePulledData()`, `persistLocalState()`, `processSyncResult()`
+
+### Medium Priority
+- [x] **Unify error classes** - 6 error classes (`RepoApiError`, `SyncError`, `EncryptionError`, `PackerError`, `ItemPackerError`, `MergeError`) unified
+  - Created `src/shared/errors.ts` with `AppError` base class and all domain error classes
+- [x] **Centralize retry configuration** - retry constants scattered across `fetch.ts`, `constants.ts`, `retry.ts`
+  - Created `src/shared/retry-config.ts` with `CONFLICT_RETRY` and `API_RETRY` config objects, plus `calculateBackoff()` and `sleep()` utilities
+- [x] **Extract plugin state validation** - `if (!state.config || !state.engine)` pattern in 3+ files
+  - Created `src/plugin/validation.ts` with type guards: `hasConfig()`, `isPluginReady()`, `isContinuousSyncReady()`, `isFullyInitialized()`
+- [x] **Move CryptoOptions type** - currently in `operations/types.ts`, should be in `src/types/crypto.ts`
+  - Created `src/types/crypto.ts` with `CryptoOptions` and `PassphraseOption` types, re-exported from `operations/types.ts` for backward compatibility
+
+### Low Priority
+- [x] **Review helper duplication** - `engine/helpers.ts` vs `operations/helpers.ts` may have overlapping functionality
+  - Reviewed: No duplication found. `engine/helpers.ts` handles orchestration (checksums, pull/push options), `operations/helpers.ts` handles low-level operations (tombstones, manifest, context). Complementary, not duplicative.
+- [x] **Consider API client base class** - `http-client.ts` and `graphql-client.ts` have similar initialization patterns
+  - Reviewed: Not worth abstracting. Only ~15 lines similar (config fields). Different APIs (REST vs GraphQL), different methods, different URL patterns. Base class would add complexity without benefit.
 
 ## In Progress: Safety & Observability
 
@@ -40,21 +67,3 @@
 - [ ] Compression improvements for large messages
 - [ ] Parallel category processing during sync
 
-## Design Notes
-
-### Timestamp-Based Sync Trade-offs (Research-Backed)
-
-- **Clock skew risk**: NTP drift 1-50ms (cloud), 100-500ms (geo-distributed)
-  - Source: "Clock Skew Conflict in Distributed Systems" (2026)
-  - Mitigation: Modern OS auto-sync via NTP (atomic clock: 1s in 3M years)
-  - Impact: Very low - machines rarely drift years apart
-  - Real-world: CockroachDB uses 500ms max offset tolerance successfully
-- **Concurrent edit data loss**: Last-write-wins on same file from 2 machines
-  - Source: "Beyond Timestamps: Conflict Resolution" (2025)
-  - Likelihood: Very low for CLI tool (one session at a time)
-  - Impact: One edit lost, logged for manual recovery
-  - Mitigation: Sessions/messages are mostly append-only (different files)
-- **Config overwrites**: Settings changes on both machines = last wins
-  - Mitigation: Show warning, allow manual merge via flags
-  - Frequency: Low - settings changed infrequently
-  - Precedent: VS Code Settings Sync (4M+ users) uses simple last-write-wins

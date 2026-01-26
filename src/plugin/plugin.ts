@@ -14,6 +14,7 @@ import {
   updateConfig,
   initializeEngine,
 } from './state-manager.js';
+import { hasConfig, isFullyInitialized } from './validation.js';
 import { getTokenSource, loadLocalData } from '../data/index.js';
 import { RepoStorageBackend } from '../storage/index.js';
 import type { PluginState } from './types.js';
@@ -26,13 +27,14 @@ import {
   startIntervalSync,
   stopBackgroundSync,
 } from './background-sync.js';
+import { getErrorMessage, getErrorStack } from '../shared/index.js';
 
 /** Default repo name for sync storage */
 const DEFAULT_REPO_NAME = '.opencode-sync';
 
 /** Validate configuration and log status. Returns true if valid. */
 function validateAndLogConfig(state: PluginState): boolean {
-  if (!state.config) {
+  if (!hasConfig(state)) {
     log('WARNING: No configuration found');
     logSetupInstructions();
     log('Plugin loaded but sync is disabled');
@@ -102,8 +104,7 @@ async function ensureStorageExists(pathConfig: PathConfig): Promise<void> {
     await updateConfig(pathConfig, { repoOwner: owner, repoName });
     initializeEngine();
   } catch (error) {
-    const errMsg = error instanceof Error ? error.message : String(error);
-    log(`ERROR: Failed to setup storage: ${errMsg}`);
+    log(`ERROR: Failed to setup storage: ${getErrorMessage(error)}`);
     throw error;
   }
 }
@@ -112,12 +113,12 @@ async function ensureStorageExists(pathConfig: PathConfig): Promise<void> {
 function performInitialSync(pathConfig: PathConfig): void {
   const state = getPluginState();
 
-  if (!state.isInitialized || !state.engine) {
+  if (!isFullyInitialized(state)) {
     log('Skipping initial sync - engine not initialized');
     return;
   }
 
-  if (!state.config?.autoSyncOnStartup) {
+  if (!state.config.autoSyncOnStartup) {
     log('Auto-sync on startup disabled');
     return;
   }
@@ -144,9 +145,9 @@ function performInitialSync(pathConfig: PathConfig): void {
         log(`Sync completed in ${String(dur)}ms: ${result.message}`);
       }
     } catch (error) {
-      const errMsg = error instanceof Error ? error.message : String(error);
-      log(`WARNING: Initial sync failed: ${errMsg}`);
-      if (error instanceof Error && error.stack) log(`Stack: ${error.stack}`);
+      log(`WARNING: Initial sync failed: ${getErrorMessage(error)}`);
+      const stack = getErrorStack(error);
+      if (stack) log(`Stack: ${stack}`);
     }
   })();
 }
@@ -169,9 +170,8 @@ export const OpencodeSyncPlugin = async (_ctx: unknown): Promise<Record<string, 
 
     return { cleanup: stopBackgroundSync };
   } catch (error) {
-    const errMsg = error instanceof Error ? error.message : String(error);
-    const stack = error instanceof Error ? error.stack : undefined;
-    log(`ERROR: Plugin initialization failed: ${errMsg}`);
+    log(`ERROR: Plugin initialization failed: ${getErrorMessage(error)}`);
+    const stack = getErrorStack(error);
     if (stack) {
       console.error(stack);
     }
