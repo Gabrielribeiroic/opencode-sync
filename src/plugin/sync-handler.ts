@@ -14,7 +14,7 @@ import {
   deleteTombstonedItems,
 } from '../data/index.js';
 import { getPluginState } from './state-manager.js';
-import { syncLog } from '../sync/engine/logger.js';
+import { syncLog } from '../logging/index.js';
 
 type LogLevel = 'error' | 'info' | 'debug' | 'warn';
 

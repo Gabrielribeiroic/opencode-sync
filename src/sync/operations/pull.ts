@@ -6,7 +6,7 @@
  */
 
 import { unpackItem } from '../item-packer.js';
-import { syncLog } from '../engine/logger.js';
+import { syncLog } from '../../logging/index.js';
 import type { StorageBackend, StorageFile } from '../../storage/index.js';
 import type { SyncCategory } from '../../types/index.js';
 import type { Tombstone, TreeIndexedCategoryInfo } from '../../types/manifest.js';

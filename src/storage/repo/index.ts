@@ -15,6 +15,6 @@ export {
 export { GitHubHttpClient } from './http-client.js';
 export { GitOperations } from './git-operations.js';
 export { GraphQLClient } from './graphql-client.js';
-export { logProgress } from './logger.js';
+export { logProgress } from '../../logging/index.js';
 export * from './constants.js';
 export type * from './types.js';

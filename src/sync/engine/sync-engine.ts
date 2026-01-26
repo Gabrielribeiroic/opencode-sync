@@ -1,6 +1,6 @@
 import type { StorageBackend } from '../../storage/index.js';
 import { RepoConflictError } from '../../storage/index.js';
-import { syncLog } from './logger.js';
+import { syncLog } from '../../logging/index.js';
 import {
   createEmptyManifest,
   type Manifest,

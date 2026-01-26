@@ -9,7 +9,7 @@ import type { Manifest, SyncResult, LocalSyncState, SyncConfig } from '../../typ
 import type { CategoryData } from '../operations/types.js';
 import { pullCategories } from '../operations/pull.js';
 import { mergeAllCategories } from '../operations/merge-operation.js';
-import { syncLog } from './logger.js';
+import { syncLog } from '../../logging/index.js';
 import { MANIFEST_FILENAME } from './types.js';
 import { buildLocalState, mergeDataForState } from './state.js';
 import {

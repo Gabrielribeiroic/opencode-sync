@@ -5,7 +5,7 @@
 import { fetchWithRetry } from './fetch.js';
 import { GRAPHQL_BATCH_SIZE } from './constants.js';
 import type { GraphQLRepositoryResponse, TruncatedFile } from './types.js';
-import { logProgress } from './logger.js';
+import { logProgress } from '../../logging/index.js';
 import { buildBatchQuery, parseGraphQLResponse } from './graphql-query.js';
 
 /** GraphQL client configuration */

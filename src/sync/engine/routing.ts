@@ -5,7 +5,7 @@
  */
 
 import { compareTimestamps } from '../vector-clock.js';
-import { syncLog } from './logger.js';
+import { syncLog } from '../../logging/index.js';
 import { needsPush } from '../operations/push.js';
 import type { Manifest, SyncResult, LocalSyncState } from '../../types/index.js';
 import type { CategoryData } from '../operations/types.js';

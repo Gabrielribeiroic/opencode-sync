@@ -17,7 +17,7 @@ import {
 import { getTokenSource, loadLocalData } from '../data/index.js';
 import { RepoStorageBackend } from '../storage/index.js';
 import type { PluginState } from './types.js';
-import { log, logSetupInstructions } from './logger.js';
+import { log, logSetupInstructions } from '../logging/index.js';
 import { getGitHubUsername, repoExists, createRepo } from './github-api.js';
 import {
   writePulledData,

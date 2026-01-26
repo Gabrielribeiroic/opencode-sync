@@ -9,7 +9,7 @@ import type { StorageBackend, StorageFile } from '../interface.js';
 import { SYNC_DIR, DEFAULT_MAX_RETRIES, DEFAULT_RETRY_DELAY_MS } from './constants.js';
 import { GitOperations } from './git-operations.js';
 import { GraphQLClient } from './graphql-client.js';
-import { logProgress } from './logger.js';
+import { logProgress } from '../../logging/index.js';
 import type { RepoClientConfig, GitTreeEntry } from './types.js';
 
 // Re-export for backward compatibility

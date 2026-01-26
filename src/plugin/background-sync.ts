@@ -13,9 +13,8 @@ import {
   deleteTombstonedItems,
 } from '../data/index.js';
 import { FileWatcher } from '../sync/watcher/index.js';
-import { syncLog } from '../sync/engine/logger.js';
+import { syncLog, log } from '../logging/index.js';
 import { getPluginState } from './state-manager.js';
-import { log } from './logger.js';
 
 /** Active file watcher instance */
 let activeWatcher: FileWatcher | null = null;

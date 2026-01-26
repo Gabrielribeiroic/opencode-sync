@@ -7,7 +7,7 @@
 import type { StorageBackend } from '../../storage/index.js';
 import type { Manifest, SyncResult } from '../../types/index.js';
 import type { CategoryData } from '../operations/types.js';
-import { syncLog } from './logger.js';
+import { syncLog } from '../../logging/index.js';
 import { fetchManifest } from './manifest.js';
 
 /** Context needed for pull-then-push operation */
