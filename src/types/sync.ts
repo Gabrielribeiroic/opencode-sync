@@ -18,6 +18,8 @@ export interface LocalSyncState {
   baseVersions: Partial<Record<SyncCategory, string>>; // JSON stringified data
   // Per-item tracking for deletion detection (sessions, messages)
   itemChecksums?: Partial<Record<SyncCategory, Record<string, string>>>;
+  // Remote git blob SHAs for incremental pull (skip unchanged files)
+  remoteShas?: Partial<Record<SyncCategory, Record<string, string>>>;
 }
 
 // ============================================================================

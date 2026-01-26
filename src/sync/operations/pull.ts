@@ -29,6 +29,8 @@ export interface PullOptions {
   backend: StorageBackend;
   /** Map of category → item ID → checksum for existing local items */
   localChecksums?: Record<SyncCategory, Record<string, string>>;
+  /** Map of category → filename → git SHA for incremental pull */
+  localRemoteShas?: Partial<Record<SyncCategory, Record<string, string>>>;
 }
 
 /**
@@ -39,6 +41,8 @@ export interface ExtendedPullResult extends PullResult {
   downloadedItems: Record<SyncCategory, string[]>;
   /** Items that should be deleted locally (tombstoned remotely) */
   tombstonedItems: Record<SyncCategory, Record<string, Tombstone>>;
+  /** Remote SHAs for all synced items (for incremental pull) */
+  remoteShas: Partial<Record<SyncCategory, Record<string, string>>>;
 }
 
 /** Result accumulator for pull operation */
@@ -47,6 +51,7 @@ interface PullAccumulator {
   changedCategories: SyncCategory[];
   downloadedItems: Record<SyncCategory, string[]>;
   tombstonedItems: Record<SyncCategory, Record<string, Tombstone>>;
+  remoteShas: Partial<Record<SyncCategory, Record<string, string>>>;
 }
 
 /** Info about a file to fetch */
@@ -63,6 +68,7 @@ function createPullAccumulator(): PullAccumulator {
     changedCategories: [],
     downloadedItems: {} as Record<SyncCategory, string[]>,
     tombstonedItems: {} as Record<SyncCategory, Record<string, Tombstone>>,
+    remoteShas: {},
   };
 }
 
@@ -71,7 +77,8 @@ function recordItemPull(
   acc: PullAccumulator,
   cat: SyncCategory,
   data: ItemCategoryData,
-  tombstones: Record<string, Tombstone>
+  tombstones: Record<string, Tombstone>,
+  shas: Record<string, string>
 ): void {
   if (Object.keys(data.items).length > 0) {
     acc.pulledData.push(data);
@@ -81,23 +88,35 @@ function recordItemPull(
   if (Object.keys(tombstones).length > 0) {
     acc.tombstonedItems[cat] = tombstones;
   }
+  // Always record SHAs (merge with existing for incremental)
+  acc.remoteShas[cat] = { ...(acc.remoteShas[cat] ?? {}), ...shas };
 }
 
-/** Build list of files to fetch, excluding tombstoned items */
+/** Build list of files to fetch, excluding tombstoned and unchanged items */
 function buildFilesToFetch(
   categoryFiles: StorageFile[],
-  categoryTombstones: Record<string, Tombstone>
+  categoryTombstones: Record<string, Tombstone>,
+  localShas?: Record<string, string>
 ): FetchInfo[] {
   const filesToFetch: FetchInfo[] = [];
+  let skipped = 0;
   for (const file of categoryFiles) {
     const itemId = getItemIdFromFilename(file.filename);
     if (!itemId) continue;
     if (itemId in categoryTombstones) continue;
+    // Skip if local has same SHA (unchanged)
+    if (localShas && file.sha && localShas[itemId] === file.sha) {
+      skipped++;
+      continue;
+    }
     filesToFetch.push({
       itemId,
       filename: file.filename,
       checksum: file.sha ?? '',
     });
+  }
+  if (skipped > 0) {
+    syncLog(`[PULL] Skipped ${String(skipped)} unchanged files`);
   }
   return filesToFetch;
 }
@@ -127,8 +146,27 @@ function processDownloadedFiles(
   return { items, checksums };
 }
 
+/** Build SHA map from fetched files */
+function buildShaMap(filesToFetch: FetchInfo[]): Record<string, string> {
+  const shas: Record<string, string> = {};
+  for (const f of filesToFetch) {
+    if (f.checksum) shas[f.itemId] = f.checksum;
+  }
+  return shas;
+}
+
+/** Load tombstones for a category */
+async function loadCategoryTombstones(
+  backend: StorageBackend,
+  cat: SyncCategory
+): Promise<Record<string, Tombstone>> {
+  const content = await backend.getFile(TOMBSTONES_FILENAME);
+  const file = parseTombstonesFile(content);
+  return getCategoryTombstones(file, cat);
+}
+
 export async function pullCategories(options: PullOptions): Promise<ExtendedPullResult> {
-  const { manifest, enabledCategories, backend, localChecksums } = options;
+  const { manifest, enabledCategories, backend, localRemoteShas } = options;
   const acc = createPullAccumulator();
 
   for (const [category, info] of Object.entries(manifest.categories)) {
@@ -138,7 +176,7 @@ export async function pullCategories(options: PullOptions): Promise<ExtendedPull
       continue;
     }
     syncLog(`[PULL] Processing ${cat} (type: ${info.type})`);
-    await pullTreeIndexedCategory(cat, info, localChecksums?.[cat] ?? {}, backend, acc);
+    await pullTreeIndexedCategory(cat, info, localRemoteShas?.[cat], backend, acc);
   }
 
   return acc;
@@ -150,7 +188,7 @@ export async function pullCategories(options: PullOptions): Promise<ExtendedPull
 async function pullTreeIndexedCategory(
   cat: SyncCategory,
   info: TreeIndexedCategoryInfo,
-  _localChecksums: Record<string, string>,
+  localShas: Record<string, string> | undefined,
   backend: StorageBackend,
   acc: PullAccumulator
 ): Promise<void> {
@@ -160,33 +198,28 @@ async function pullTreeIndexedCategory(
   const allFiles = await backend.listFiles();
   const categoryFiles = allFiles.filter((f) => f.filename.startsWith(info.pathPrefix));
   syncLog(`[PULL] ${cat}: found ${String(categoryFiles.length)} files in tree`);
-
   if (categoryFiles.length === 0) return;
 
-  // Load tombstones from separate file
-  const tombstonesContent = await backend.getFile(TOMBSTONES_FILENAME);
-  const tombstonesFile = parseTombstonesFile(tombstonesContent);
-  const categoryTombstones = getCategoryTombstones(tombstonesFile, cat);
+  // Load tombstones and build file list
+  const categoryTombstones = await loadCategoryTombstones(backend, cat);
   syncLog(`[PULL] ${cat}: ${String(Object.keys(categoryTombstones).length)} tombstones`);
-
-  // Build list of files to download (excluding tombstoned items)
-  const filesToFetch = buildFilesToFetch(categoryFiles, categoryTombstones);
+  const filesToFetch = buildFilesToFetch(categoryFiles, categoryTombstones, localShas);
+  syncLog(`[PULL] ${cat}: ${String(filesToFetch.length)} files to fetch`);
 
   if (filesToFetch.length === 0) {
-    if (Object.keys(categoryTombstones).length > 0) {
-      acc.tombstonedItems[cat] = categoryTombstones;
-    }
+    if (Object.keys(categoryTombstones).length > 0) acc.tombstonedItems[cat] = categoryTombstones;
     return;
   }
 
   // Bulk download and process files
+  syncLog(`[PULL] ${cat}: starting bulk download...`);
   const contents = await backend.getFiles(filesToFetch.map((f) => f.filename));
   const { items, checksums } = processDownloadedFiles(filesToFetch, contents);
   syncLog(
     `[PULL] ${cat}: downloaded ${String(Object.keys(items).length)}/${String(filesToFetch.length)} items`
   );
 
-  // Record results
+  // Record results with SHAs for incremental sync
   const data: ItemCategoryData = { category: cat, type: 'items', items, checksums };
-  recordItemPull(acc, cat, data, categoryTombstones);
+  recordItemPull(acc, cat, data, categoryTombstones, buildShaMap(filesToFetch));
 }

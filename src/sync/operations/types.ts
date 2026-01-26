@@ -71,6 +71,8 @@ export interface PreparePushOptions {
   passphrase: PassphraseOption;
   existingFiles?: string[];
   remoteManifest?: Manifest;
+  /** Remote file SHAs for incremental push (filename -> git blob SHA) */
+  remoteShas?: Record<string, string>;
 }
 
 export { type SyncResult, type Manifest, type SyncCategory, type LocalSyncState };

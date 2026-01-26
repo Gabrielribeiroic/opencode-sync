@@ -1,6 +1,6 @@
 /** Push Operation - Pushes local data to remote storage. */
 
-import { packItem, buildItemInfo, diffItems } from '../item-packer.js';
+import { packItem, buildItemInfo, diffItems, getItemFilename } from '../item-packer.js';
 import {
   processTombstonesForPush,
   removeItemsById,
@@ -45,11 +45,17 @@ export function preparePushData(opts: PreparePushOptions): PreparePushResult {
   const newFiles = new Set<string>();
   const changedCategories: SyncCategory[] = [];
 
+  // Get previously synced checksums to detect what actually changed
+  const lastSyncedChecksums = localState?.itemChecksums;
+
   for (const catData of localData) {
     if (!config.sync[catData.category]) continue;
-    const filenames = packCategoryData(catData, remoteManifest, ctx);
+    const prevChecksums = lastSyncedChecksums?.[catData.category];
+    const filenames = packCategoryData(catData, remoteManifest, ctx, prevChecksums);
     for (const f of filenames) newFiles.add(f);
-    changedCategories.push(catData.category);
+    if (filenames.length > 0) {
+      changedCategories.push(catData.category);
+    }
   }
 
   markOrphanedFiles(ctx.files, existingFiles, newFiles);
@@ -61,10 +67,23 @@ export function preparePushData(opts: PreparePushOptions): PreparePushResult {
 function packCategoryData(
   catData: CategoryData,
   _remoteManifest: Manifest | undefined,
-  ctx: PushContext
+  ctx: PushContext,
+  prevChecksums?: Record<string, string>
 ): string[] {
-  // All categories now use tree-indexed sync, no remote item tracking needed
-  return packItemCategoryData(catData, {}, ctx, {});
+  // Use previous checksums to build pseudo ItemInfo for diff comparison
+  const remoteItems: Record<string, ItemInfo> = {};
+  if (prevChecksums) {
+    for (const [itemId, checksum] of Object.entries(prevChecksums)) {
+      remoteItems[itemId] = {
+        filename: getItemFilename(catData.category, itemId),
+        checksum,
+        size: 0,
+        lastModified: '',
+        lastModifiedBy: '',
+      };
+    }
+  }
+  return packItemCategoryData(catData, remoteItems, ctx, {});
 }
 
 /** Result of processing items for push */

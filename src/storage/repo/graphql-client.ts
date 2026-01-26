@@ -55,6 +55,7 @@ export class GraphQLClient {
 
     // Process in batches to avoid GraphQL query complexity limits
     let apiCalls = 0;
+    const totalBatches = Math.ceil(paths.length / GRAPHQL_BATCH_SIZE);
     for (let i = 0; i < paths.length; i += GRAPHQL_BATCH_SIZE) {
       const batch = paths.slice(i, i + GRAPHQL_BATCH_SIZE);
       const batchResult = await this.fetchFilesViaGraphQL(batch, branch, fetchBlob);
@@ -62,6 +63,11 @@ export class GraphQLClient {
 
       for (const [path, content] of Object.entries(batchResult)) {
         result[path] = content;
+      }
+
+      // Log progress every 10 batches for large fetches
+      if (totalBatches > 10 && apiCalls % 10 === 0) {
+        logProgress(`GraphQL fetch progress: ${String(apiCalls)}/${String(totalBatches)} batches`);
       }
     }
 

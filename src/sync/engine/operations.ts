@@ -44,7 +44,14 @@ export async function executePushOperation(
   data: CategoryData[],
   remote?: Manifest
 ): Promise<{ result: SyncResult; newState: LocalSyncState }> {
-  const existing = (await ctx.backend.listFiles()).map((f) => f.filename);
+  const remoteFiles = await ctx.backend.listFiles();
+  const existing = remoteFiles.map((f) => f.filename);
+
+  // Build SHA map for comparison (filename -> git blob SHA)
+  const remoteShas: Record<string, string> = {};
+  for (const f of remoteFiles) {
+    if (f.sha) remoteShas[f.filename] = f.sha;
+  }
 
   const opts = {
     localData: data,
@@ -52,6 +59,7 @@ export async function executePushOperation(
     localState: ctx.localState,
     passphrase: buildCryptoOptions(ctx.passphrase, ctx.oldPassphrase),
     existingFiles: existing,
+    remoteShas,
   };
   const { files, manifest, changedCategories } = executePush(opts, remote);
   const fileCount = Object.keys(files).length;
@@ -67,7 +75,7 @@ export async function executePushOperation(
 
 /** Execute a pull operation and return updated local state */
 export async function executePullOperation(
-  ctx: OperationContext,
+  ctx: PushContext,
   remote?: Manifest,
   data?: CategoryData[]
 ): Promise<{ result: SyncResult; newState: LocalSyncState | null }> {
@@ -79,12 +87,18 @@ export async function executePullOperation(
       passphrase: buildCryptoOptions(ctx.passphrase, ctx.oldPassphrase),
       backend: ctx.backend,
     },
-    data
+    data,
+    ctx.localState
   );
-  const { pulledData, changedCategories, tombstonedItems } = await pullCategories(opts);
+  const { pulledData, changedCategories, tombstonedItems, remoteShas } = await pullCategories(opts);
   syncLog(`[SYNC] Pull: ${String(changedCategories.length)} categories`);
   const mergedData = mergeDataForState(data, pulledData);
   const newState = buildLocalState(remote, mergedData, ctx.getStorageId(), ctx.config.machineId);
+  // Merge remote SHAs: keep existing ones and add/update from pull
+  newState.remoteShas = {
+    ...(ctx.localState?.remoteShas ?? {}),
+    ...remoteShas,
+  };
   const tombstoneIds = extractTombstoneIds(tombstonedItems);
   return {
     result: buildPullResult({ changedCategories, pulledData, tombstonedItems: tombstoneIds }),

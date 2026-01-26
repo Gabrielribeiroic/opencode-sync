@@ -38,17 +38,22 @@ export function buildLocalChecksums(
 }
 
 /**
- * Build pull options, conditionally including localChecksums.
+ * Build pull options, conditionally including localChecksums and localRemoteShas.
  */
 export function buildPullOptions(
-  base: Omit<PullOptions, 'localChecksums'>,
-  localData?: CategoryData[]
+  base: Omit<PullOptions, 'localChecksums' | 'localRemoteShas'>,
+  localData?: CategoryData[],
+  localState?: LocalSyncState | null
 ): PullOptions {
   const localChecksums = buildLocalChecksums(localData);
+  const opts: PullOptions = { ...base };
   if (localChecksums) {
-    return { ...base, localChecksums };
+    opts.localChecksums = localChecksums;
   }
-  return base;
+  if (localState?.remoteShas) {
+    opts.localRemoteShas = localState.remoteShas;
+  }
+  return opts;
 }
 
 /** Build push options with conditional remoteManifest */
@@ -58,6 +63,8 @@ export interface PushOptsBase {
   localState: LocalSyncState | null;
   passphrase: PassphraseOption;
   existingFiles: string[];
+  /** Remote file SHAs for incremental push (filename -> git blob SHA) */
+  remoteShas?: Record<string, string>;
 }
 
 /** Execute push and return files for storage */
