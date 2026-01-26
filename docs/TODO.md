@@ -21,7 +21,7 @@
 - [x] Pull-then-push flow (when remote is newer, pull first then push local changes)
 - [x] Consolidate logger files - unified logging system with ports & adapters pattern
 
-## In Progress: Code Quality & Refactoring
+## Completed: Code Quality & Refactoring
 
 ### High Priority
 - [x] **Consolidate encoding utilities** - `packer.ts` & `item-packer.ts` have identical `calculateChecksum()`, `uint8ArrayToBase64()`, `base64ToUint8Array()`
@@ -46,6 +46,14 @@
   - Reviewed: No duplication found. `engine/helpers.ts` handles orchestration (checksums, pull/push options), `operations/helpers.ts` handles low-level operations (tombstones, manifest, context). Complementary, not duplicative.
 - [x] **Consider API client base class** - `http-client.ts` and `graphql-client.ts` have similar initialization patterns
   - Reviewed: Not worth abstracting. Only ~15 lines similar (config fields). Different APIs (REST vs GraphQL), different methods, different URL patterns. Base class would add complexity without benefit.
+
+### Codebase Audit Fixes
+- [x] **Architecture violation: shared module imported plugin state** - `sync-result-handler.ts` imported `getPluginState()` from plugin
+  - Refactored `persistLocalState()` to accept engine as parameter, callers now handle state updates locally
+- [x] **Dead code: duplicate `getCryptoOptions`** - Unused function in `engine/types.ts` duplicated `buildCryptoOptions` in `engine/helpers.ts`
+  - Removed unused `getCryptoOptions` from `engine/types.ts`
+- [x] **Dead code: unused `removeItemsWithTombstones`** - Function in `tombstone.ts` was never imported
+  - Removed unused function
 
 ## In Progress: Safety & Observability
 
