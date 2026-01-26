@@ -1,13 +1,11 @@
 /**
- * Vector Clock Types - For distributed conflict detection
+ * Timestamp-Based Sync Types
+ *
+ * Simple timestamp comparison for sync decisions (last-write-wins).
  */
 
-/** Machine ID to logical timestamp mapping */
-export type VectorClock = Record<string, number>;
-
-/** Result of comparing two vector clocks */
-export type VectorClockComparison =
-  | 'local-ahead' // Safe to push
-  | 'remote-ahead' // Need to pull first
-  | 'concurrent' // Conflict - both have changes
-  | 'equal'; // Already in sync
+/** Result of comparing two timestamps */
+export type TimestampComparison =
+  | 'local-newer' // Safe to push
+  | 'remote-newer' // Need to pull first
+  | 'equal'; // Already in sync (or use checksum as tiebreaker)

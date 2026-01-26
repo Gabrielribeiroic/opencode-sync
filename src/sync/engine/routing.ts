@@ -1,10 +1,10 @@
 /**
  * Sync Routing Logic
  *
- * Determines sync action based on vector clock comparison.
+ * Determines sync action based on timestamp comparison (last-write-wins).
  */
 
-import { compareVectorClocks } from '../vector-clock.js';
+import { compareTimestamps } from '../vector-clock.js';
 import { syncLog } from './logger.js';
 import { needsPush } from '../operations/push.js';
 import type { Manifest, SyncResult, LocalSyncState } from '../../types/index.js';
@@ -19,26 +19,32 @@ export interface RouteResult {
 }
 
 /**
- * Determine sync action based on vector clock comparison.
+ * Determine sync action based on timestamp comparison.
+ * Uses last-write-wins semantics - no more 'concurrent' state.
  */
 export function determineAction(
   localState: LocalSyncState | null,
   remoteManifest: Manifest,
   localData: CategoryData[]
 ): RouteResult {
-  const cmp = compareVectorClocks(localState?.vectorClock ?? {}, remoteManifest.vectorClock);
+  const localTimestamp = localState?.lastSyncedAt;
+  const remoteTimestamp = remoteManifest.updatedAt;
+
+  const cmp = compareTimestamps(localTimestamp, remoteTimestamp);
   const pushNeeded = cmp === 'equal' ? needsPush(localData, remoteManifest) : false;
-  syncLog(`[SYNC] Clock: ${cmp}, needsPush=${String(pushNeeded)}`);
+  syncLog(`[SYNC] Timestamp: ${cmp}, needsPush=${String(pushNeeded)}`);
 
   switch (cmp) {
     case 'equal':
+      // Same timestamp - use checksum to decide
       return pushNeeded ? { action: 'push' } : { action: 'no-change' };
-    case 'local-ahead':
+    case 'local-newer':
+      // Local has newer changes - push them
       return { action: 'push' };
-    case 'remote-ahead':
+    case 'remote-newer':
+      // Remote has newer changes - pull first, then push if local has changes
+      // This implements last-write-wins: remote wins, we'll push our changes after
       return { action: 'pull' };
-    case 'concurrent':
-      return { action: 'conflict' };
   }
 }
 
@@ -59,7 +65,9 @@ export async function executeRoute(
     case 'pull':
       return handlers.pull();
     case 'conflict':
-      return handlers.conflict();
+      // With timestamp-based sync, conflicts are resolved by last-write-wins
+      // This handler is kept for API compatibility but routes to pull
+      return handlers.pull();
     case 'no-change':
       return buildNoChangeResult();
   }

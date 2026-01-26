@@ -83,9 +83,8 @@ export interface OperationContext {
 export interface PushContext extends OperationContext {
   files: Record<string, { content: string | null }>; // null = delete file
   manifest: Manifest;
-  now: string;
+  now: string; // ISO timestamp for this push operation
   machineId: string;
-  newClock: Record<string, number>;
 }
 
 export interface PullResult {

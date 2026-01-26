@@ -129,7 +129,6 @@ function packBlobCategoryData(category: SyncCategory, data: string, ctx: PushCon
     checksum: packed.checksum,
     lastModified: ctx.now,
     lastModifiedBy: ctx.machineId,
-    vectorClock: { [ctx.machineId]: ctx.newClock[ctx.machineId] ?? 1 },
   };
 
   return packed.chunks.map((c) => c.filename);

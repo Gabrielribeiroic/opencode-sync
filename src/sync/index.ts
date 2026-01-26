@@ -1,7 +1,7 @@
 /**
  * Sync Module
  *
- * Core sync functionality: engine, vector clocks, packer, merge, and watcher.
+ * Core sync functionality: engine, timestamp-based sync, packer, merge, and watcher.
  */
 
 // Engine
@@ -14,17 +14,8 @@ export { preparePushData, needsPush } from './operations/push.js';
 export { pullCategories, downloadChunks } from './operations/pull.js';
 export { mergeAllCategories } from './operations/merge-operation.js';
 
-// Vector Clock
-export {
-  compareVectorClocks,
-  mergeVectorClocks,
-  incrementClock,
-  createVectorClock,
-  dominates,
-  getAheadMachines,
-  cloneVectorClock,
-  vectorClocksEqual,
-} from './vector-clock.js';
+// Timestamp-based sync (replaces vector clocks)
+export { compareTimestamps } from './vector-clock.js';
 
 // Packer
 export {

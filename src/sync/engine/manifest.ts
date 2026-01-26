@@ -9,6 +9,7 @@ import { RepoApiError } from '../../storage/index.js';
 import type { Manifest, CategoryShard, ItemCategoryInfo } from '../../types/index.js';
 import { isShardedRef, type SyncCategory } from '../../types/index.js';
 import { MANIFEST_FILENAME } from './types.js';
+import { syncLog } from './logger.js';
 
 /**
  * Fetch and parse the manifest from storage.
@@ -34,13 +35,20 @@ export async function fetchCategoryShard(
   backend: StorageBackend,
   shardFile: string
 ): Promise<CategoryShard | null> {
+  let content: string | null = null;
   try {
-    const content = await backend.getFile(shardFile);
+    content = await backend.getFile(shardFile);
     if (!content) return null;
     return JSON.parse(content) as CategoryShard;
   } catch (error) {
     if (error instanceof RepoApiError && error.status === 404) {
       return null;
+    }
+    // Log JSON parse errors for debugging with content preview
+    if (error instanceof SyntaxError) {
+      const preview = content ? content.slice(0, 200) : 'null';
+      syncLog(`[MANIFEST] JSON parse error in ${shardFile}: ${error.message}`);
+      syncLog(`[MANIFEST] Content preview: ${preview}`);
     }
     throw error;
   }
@@ -76,7 +84,6 @@ export async function resolveCategoryInfo(
       itemCount: Object.keys(shard.items).length,
       lastModified: info.lastModified,
       lastModifiedBy: info.lastModifiedBy,
-      vectorClock: info.vectorClock,
     };
   }
 

@@ -2,7 +2,6 @@
  * Sync Operation Types
  */
 
-import type { VectorClock } from './vector-clock.js';
 import type { SyncCategory } from './categories.js';
 
 // ============================================================================
@@ -13,8 +12,7 @@ export interface LocalSyncState {
   storageId: string;
   machineId: string;
   lastSyncedVersion: number;
-  lastSyncedAt: string;
-  vectorClock: VectorClock; // Our view of the global clock after last sync
+  lastSyncedAt: string; // ISO timestamp - used for sync direction decisions
   categoryChecksums: Partial<Record<SyncCategory, string>>;
   // Base versions for three-way merge (stored after each successful sync)
   baseVersions: Partial<Record<SyncCategory, string>>; // JSON stringified data

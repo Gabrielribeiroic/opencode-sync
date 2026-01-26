@@ -50,7 +50,6 @@ export function writeShardedCategory(
     tombstoneCount: Object.keys(tombstones).length,
     lastModified: ctx.now,
     lastModifiedBy: ctx.machineId,
-    vectorClock: { [ctx.machineId]: ctx.newClock[ctx.machineId] ?? 1 },
   } satisfies ShardedCategoryRef;
 
   return shardFile;

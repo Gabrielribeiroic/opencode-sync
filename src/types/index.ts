@@ -4,8 +4,8 @@
  * Re-exports all types from organized modules
  */
 
-// Vector Clock
-export type { VectorClock, VectorClockComparison } from './vector-clock.js';
+// Timestamp-based sync (replaces vector clocks)
+export type { TimestampComparison } from './vector-clock.js';
 
 // Configuration
 export type { SyncConfig } from './config.js';

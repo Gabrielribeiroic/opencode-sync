@@ -139,9 +139,40 @@ export class SyncEngine {
     const route = determineAction(this.localState, m, d);
     return executeRoute(route, {
       push: () => this.push(d, r, m),
-      pull: () => this.pull(m, d),
+      pull: () => this.pullThenPush(m, d, r),
       conflict: () => this.handleConflict(d, m, r),
     });
+  }
+
+  /** Pull remote changes, then push local changes if needed */
+  private async pullThenPush(
+    manifest: Manifest,
+    data: CategoryData[],
+    retry: number
+  ): Promise<SyncResult> {
+    // First pull remote changes
+    const pullResult = await this.performPull(manifest, data);
+    if (!pullResult.success) return pullResult;
+
+    // After pull, check if local data still needs pushing
+    // Re-fetch manifest to get updated state after pull wrote new state
+    const newManifest = await fetchManifest(this.backend);
+    if (!newManifest) return pullResult;
+
+    // Check if local has changes that need pushing
+    const { needsPush } = await import('../operations/push.js');
+    if (needsPush(data, newManifest)) {
+      syncLog('[SYNC] Local has changes after pull, pushing...');
+      const pushResult = await this.push(data, retry, newManifest);
+      // Combine results - report both pull and push
+      return {
+        ...pushResult,
+        action: 'merged',
+        message: `Pulled then pushed: ${pullResult.message}, ${pushResult.message}`,
+      };
+    }
+
+    return pullResult;
   }
 
   private async performPush(data: CategoryData[], remote?: Manifest): Promise<SyncResult> {

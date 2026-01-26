@@ -41,7 +41,6 @@ export function buildLocalState(
     machineId,
     lastSyncedVersion: manifest.version,
     lastSyncedAt: now,
-    vectorClock: manifest.vectorClock,
     categoryChecksums: checksums,
     baseVersions,
     itemChecksums,

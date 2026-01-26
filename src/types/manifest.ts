@@ -2,7 +2,6 @@
  * Manifest Types - Storage metadata and sync state
  */
 
-import type { VectorClock } from './vector-clock.js';
 import type { SyncCategory } from './categories.js';
 
 /**
@@ -15,9 +14,8 @@ export interface BlobCategoryInfo {
   totalSize: number; // Uncompressed bytes
   compressedSize: number; // Compressed bytes
   checksum: string; // SHA-256 of combined data
-  lastModified: string; // ISO timestamp
+  lastModified: string; // ISO timestamp - used for sync decisions
   lastModifiedBy: string; // Machine ID
-  vectorClock: VectorClock; // Category-specific vector clock
 }
 
 /**
@@ -32,9 +30,8 @@ export interface ItemCategoryInfo {
   tombstones: Record<string, Tombstone>;
   /** Total number of live items (excludes tombstoned) */
   itemCount: number;
-  lastModified: string; // ISO timestamp
+  lastModified: string; // ISO timestamp - used for sync decisions
   lastModifiedBy: string; // Machine ID
-  vectorClock: VectorClock; // Category-specific vector clock
 }
 
 /** Metadata for a single item in per-item sync */
@@ -107,9 +104,8 @@ export interface ShardedCategoryRef {
   itemCount: number;
   /** Number of tombstones (for metrics) */
   tombstoneCount: number;
-  lastModified: string;
+  lastModified: string; // ISO timestamp - used for sync decisions
   lastModifiedBy: string;
-  vectorClock: VectorClock;
 }
 
 /** Extended category info union including sharded reference */
@@ -154,13 +150,10 @@ export interface SyncHistoryEntry {
 
 export interface Manifest {
   version: number; // Incremented on each push
-  schemaVersion: '1.0' | '2.0' | '2.1'; // 2.1 adds sharding support
+  schemaVersion: '1.0' | '2.0' | '2.1' | '3.0'; // 3.0 removes vector clocks
   createdAt: string;
-  updatedAt: string;
+  updatedAt: string; // ISO timestamp - used for sync direction decisions
   lastUpdatedBy: string; // Machine ID
-
-  // Global vector clock for conflict detection
-  vectorClock: VectorClock;
 
   // Per-category tracking (supports blob, items, and sharded references)
   categories: Partial<Record<SyncCategory, CategoryInfo | ShardedCategoryRef>>;
@@ -176,11 +169,10 @@ export function createEmptyManifest(machineId: string): Manifest {
   const now = new Date().toISOString();
   return {
     version: 0,
-    schemaVersion: '2.0',
+    schemaVersion: '3.0',
     createdAt: now,
     updatedAt: now,
     lastUpdatedBy: machineId,
-    vectorClock: { [machineId]: 0 },
     categories: {},
     recentSyncs: [],
   };

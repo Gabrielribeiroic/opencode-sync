@@ -8,7 +8,6 @@ import type { SyncHistoryEntry, Manifest } from '../../types/index.js';
 import { MAX_SYNC_HISTORY } from '../../types/index.js';
 import type { ItemInfo, Tombstone } from '../../types/manifest.js';
 import { mergeTombstones, filterExpiredTombstones } from '../tombstone.js';
-import { incrementClock } from '../vector-clock.js';
 import type {
   LocalSyncState,
   SyncCategory,
@@ -76,20 +75,18 @@ export function removeItemsById(
   return result;
 }
 
-/** Create base manifest structure. */
+/** Create base manifest structure (timestamp-based, no vector clocks). */
 export function createManifest(
   now: string,
-  newClock: Record<string, number>,
   localState: LocalSyncState | null,
   machineId: string
 ): Manifest {
   return {
     version: (localState?.lastSyncedVersion ?? 0) + 1,
-    schemaVersion: '2.0',
+    schemaVersion: '3.0',
     createdAt: localState?.lastSyncedAt ?? now,
     updatedAt: now,
     lastUpdatedBy: machineId,
-    vectorClock: newClock,
     categories: {},
     recentSyncs: [],
   };
@@ -120,7 +117,7 @@ export function markOrphanedFiles(
   }
 }
 
-/** Build push context with manifest and clock. */
+/** Build push context with manifest (timestamp-based). */
 export function buildPushContext(
   config: PreparePushOptions['config'],
   localState: LocalSyncState | null,
@@ -128,13 +125,11 @@ export function buildPushContext(
 ): PushContext {
   const now = new Date().toISOString();
   const machineId = config.machineId;
-  const newClock = incrementClock(localState?.vectorClock ?? {}, machineId);
   return {
     files: {},
-    manifest: createManifest(now, newClock, localState, machineId),
+    manifest: createManifest(now, localState, machineId),
     now,
     machineId,
-    newClock,
     config: config as PushContext['config'],
     localState,
     passphrase,

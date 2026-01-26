@@ -133,7 +133,6 @@ async function pullShardedCategoryToAcc(
     itemCount: Object.keys(shard.items).length,
     lastModified: ref.lastModified,
     lastModifiedBy: ref.lastModifiedBy,
-    vectorClock: ref.vectorClock,
   };
 
   const data = await pullItemCategory(cat, info, localChecksums, backend);
@@ -152,7 +151,7 @@ async function pullBlobCategory(
 ): Promise<string> {
   const chunks = await downloadChunks(storageFiles, info.files, backend);
   // Skip checksum validation - blob categories legitimately differ between machines
-  // (dev/prod builds, different projects/state) and CDN caching causes false positives
+  // (dev/prod builds, different projects/state)
   const data = unpackCategory(chunks);
 
   // Let maybeDecrypt handle credentials - it will detect if data is encrypted

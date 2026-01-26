@@ -1,7 +1,8 @@
 /**
  * GitHub Repository Storage Backend
  *
- * Uses GitHub Contents/Tree/Commit API for atomic multi-file sync.
+ * Uses GitHub Tree/Commit API for atomic multi-file push.
+ * Uses GitHub GraphQL API for efficient bulk file fetch (O(1) instead of O(n)).
  */
 
 /* eslint-disable max-lines */
@@ -33,6 +34,17 @@ interface GitRef {
 
 interface GitTreeResponse {
   sha: string;
+  tree?: GitTreeEntry[];
+  truncated?: boolean;
+}
+
+interface GitTreeEntry {
+  path: string;
+  mode: string;
+  type: 'blob' | 'tree';
+  sha: string;
+  size?: number;
+  url: string;
 }
 
 interface GitCommit {
@@ -48,14 +60,8 @@ interface TreeEntry {
   content?: string;
 }
 
-interface ContentFile {
-  name: string;
-  path: string;
-  sha: string;
-  size: number;
-  content?: string;
-  encoding?: string;
-}
+/** Max files per GraphQL batch (GitHub has query complexity limits) */
+const GRAPHQL_BATCH_SIZE = 100;
 
 /**
  * GitHub Repository storage backend implementation.
@@ -82,10 +88,11 @@ export class RepoStorageBackend implements StorageBackend {
 
   public async exists(): Promise<boolean> {
     try {
-      const res = await this.fetchAllowNotFound(`/contents/${SYNC_DIR}/manifest.json`);
-      return res?.ok ?? false;
+      const tree = await this.getTreeWithFiles();
+      if (!tree) return false;
+      return tree.some((entry: GitTreeEntry) => entry.path === `${SYNC_DIR}/manifest.json`);
     } catch (error) {
-      // 404 means file doesn't exist, which is expected for new repos
+      // 404 means branch doesn't exist, which is expected for new repos
       if (error instanceof RepoApiError && error.status === 404) {
         return false;
       }
@@ -94,20 +101,12 @@ export class RepoStorageBackend implements StorageBackend {
   }
 
   public async initialize(manifest: string): Promise<void> {
-    await this.createOrUpdateFile(
-      `${SYNC_DIR}/manifest.json`,
-      manifest,
-      'Initialize OpenCode Sync'
-    );
+    await this.updateFiles({ 'manifest.json': manifest });
   }
 
   public async getFile(path: string): Promise<string | null> {
-    const fullPath = `${SYNC_DIR}/${path}`;
-    const branch = await this.getBranch();
-    // Use raw.githubusercontent.com with cache-bust to avoid stale CDN responses
-    const cacheBust = Date.now();
-    const url = `https://raw.githubusercontent.com/${this.owner}/${this.repo}/${branch}/${fullPath}?cb=${String(cacheBust)}`;
-    return await this.fetchRawFile(url);
+    const result = await this.getFiles([path]);
+    return result[path] ?? null;
   }
 
   public async updateFiles(files: Record<string, string | null>): Promise<void> {
@@ -157,111 +156,118 @@ export class RepoStorageBackend implements StorageBackend {
   }
 
   public async listFiles(): Promise<StorageFile[]> {
-    const res = await this.fetchAllowNotFound(`/contents/${SYNC_DIR}`);
-    if (!res?.ok) return [];
+    const entries = await this.getSyncDirTree();
 
-    const data = (await res.json()) as ContentFile[];
-    return data.map((f) => ({
-      filename: f.name,
-      sha: f.sha,
-      size: f.size,
+    return entries.map((entry) => ({
+      filename: entry.path.replace(`${SYNC_DIR}/`, ''),
+      sha: entry.sha,
+      size: entry.size ?? 0,
     }));
   }
 
   /**
-   * Bulk fetch multiple files using raw.githubusercontent.com.
-   * No API rate limits - all files fetched in parallel.
+   * Bulk fetch multiple files using GitHub GraphQL API.
+   * Uses aliases to batch multiple file content requests in a SINGLE API call.
+   * This is dramatically more efficient than REST API (1 call vs N calls).
+   *
+   * Example: 100 files = 1-2 GraphQL calls instead of 100+ REST calls.
    */
   public async getFiles(paths: string[]): Promise<Record<string, string | null>> {
     if (paths.length === 0) return {};
 
     const startTime = Date.now();
-    const fetched = await this.fetchFilesViaRaw(paths);
-
+    const branch = await this.getBranch();
     const result: Record<string, string | null> = {};
-    for (const { path, content } of fetched) {
-      result[path] = content;
+
+    // Process in batches to avoid GraphQL query complexity limits
+    let apiCalls = 0;
+    for (let i = 0; i < paths.length; i += GRAPHQL_BATCH_SIZE) {
+      const batch = paths.slice(i, i + GRAPHQL_BATCH_SIZE);
+      const batchResult = await this.fetchFilesViaGraphQL(batch, branch);
+      apiCalls++;
+
+      for (const [path, content] of Object.entries(batchResult)) {
+        result[path] = content;
+      }
     }
 
     const duration = Date.now() - startTime;
-    const found = fetched.filter((f) => f.content !== null).length;
+    const found = Object.values(result).filter((c) => c !== null).length;
     this.logProgress(
-      `Bulk fetch: ${String(found)}/${String(paths.length)} files in ${String(duration)}ms (0 API calls)`
+      `GraphQL bulk fetch: ${String(found)}/${String(paths.length)} files in ${String(duration)}ms (${String(apiCalls)} API calls)`
     );
 
     return result;
   }
 
   /**
-   * Fetch files via raw.githubusercontent.com with API fallback.
-   * Uses raw endpoint first (no rate limits), falls back to Contents API
-   * for files not found (CDN caching can cause stale 404s).
+   * Fetch multiple files in a single GraphQL request using aliases.
+   * Falls back to REST Blob API for truncated (large) files.
    */
-  private async fetchFilesViaRaw(
-    paths: string[]
-  ): Promise<{ path: string; content: string | null }[]> {
-    const branch = await this.getBranch();
-    const baseUrl = `https://raw.githubusercontent.com/${this.owner}/${this.repo}/${branch}`;
-    const cacheBust = Date.now();
+  private async fetchFilesViaGraphQL(
+    paths: string[],
+    branch: string
+  ): Promise<Record<string, string | null>> {
+    const query = this.buildGraphQLBatchQuery(paths, branch);
+    const res = await this.graphqlFetch(query);
+    if (!res) return Object.fromEntries(paths.map((p) => [p, null]));
 
-    // First pass: try raw.githubusercontent.com (fast, no rate limits)
-    const results = await Promise.all(
-      paths.map(async (path) => {
-        const content = await this.fetchRawFile(
-          `${baseUrl}/${SYNC_DIR}/${path}?cb=${String(cacheBust)}`
-        );
-        return { path, content };
-      })
-    );
+    // Parse response and identify truncated files
+    const { result, truncated } = this.parseGraphQLResponse(paths, res);
 
-    // Find files that returned null (might be CDN cache issue)
-    const missingPaths = results.filter((r) => r.content === null).map((r) => r.path);
+    // Fallback: fetch truncated files via REST Blob API
+    if (truncated.length > 0) {
+      this.logProgress(`${String(truncated.length)} files truncated, using Blob API fallback`);
+      await this.fetchTruncatedFiles(truncated, result);
+    }
 
-    // Fallback: use Contents API for missing files (rate limited but fresh)
-    if (missingPaths.length > 0) {
-      this.logProgress(`Raw CDN missed ${String(missingPaths.length)} files, using API fallback`);
-      const apiFetched = await this.fetchFilesViaContentsApi(missingPaths);
-      // Merge API results back
-      for (const result of results) {
-        const apiContent = apiFetched[result.path];
-        if (result.content === null && apiContent !== undefined) {
-          result.content = apiContent;
-        }
+    return result;
+  }
+
+  /** Parse GraphQL response, extracting content and identifying truncated files */
+  private parseGraphQLResponse(
+    paths: string[],
+    res: { repository?: Record<string, unknown> }
+  ): { result: Record<string, string | null>; truncated: { path: string; oid: string }[] } {
+    const result: Record<string, string | null> = {};
+    const truncated: { path: string; oid: string }[] = [];
+
+    for (let i = 0; i < paths.length; i++) {
+      const path = paths[i];
+      if (path === undefined) continue;
+
+      const fileObj = res.repository?.[`file${String(i)}`];
+      if (fileObj === null || fileObj === undefined) {
+        result[path] = null;
+        continue;
+      }
+
+      const fileData = fileObj as { text?: string | null; isTruncated?: boolean; oid?: string };
+      if (fileData.isTruncated && fileData.oid) {
+        truncated.push({ path, oid: fileData.oid });
+        result[path] = null;
+      } else {
+        result[path] = fileData.text ?? null;
       }
     }
 
-    return results;
+    return { result, truncated };
   }
 
-  /**
-   * Fetch files via Contents API (fallback for CDN cache misses).
-   * This is rate-limited but always returns fresh data.
-   */
-  private async fetchFilesViaContentsApi(paths: string[]): Promise<Record<string, string | null>> {
-    const results: Record<string, string | null> = {};
-
-    // Fetch in parallel but limit concurrency to avoid rate limits
-    const batchSize = 10;
-    for (let i = 0; i < paths.length; i += batchSize) {
-      const batch = paths.slice(i, i + batchSize);
-      const batchResults = await Promise.all(
-        batch.map(async (path) => {
-          const content = await this.fetchFileViaContentsApi(path);
-          return { path, content };
-        })
-      );
-      for (const { path, content } of batchResults) {
-        results[path] = content;
-      }
+  /** Fetch truncated files via REST Blob API */
+  private async fetchTruncatedFiles(
+    files: { path: string; oid: string }[],
+    result: Record<string, string | null>
+  ): Promise<void> {
+    for (const { path, oid } of files) {
+      result[path] = await this.fetchBlob(oid);
     }
-
-    return results;
   }
 
-  /** Fetch a single file via Contents API */
-  private async fetchFileViaContentsApi(path: string): Promise<string | null> {
+  /** Fetch a single blob by SHA via REST API (for large files) */
+  private async fetchBlob(sha: string): Promise<string | null> {
     try {
-      const res = await this.fetchAllowNotFound(`/contents/${SYNC_DIR}/${path}`);
+      const res = await this.fetchAllowNotFound(`/git/blobs/${sha}`);
       if (!res?.ok) return null;
 
       const data = (await res.json()) as { content?: string; encoding?: string };
@@ -273,18 +279,68 @@ export class RepoStorageBackend implements StorageBackend {
     }
   }
 
-  /** Fetch a single file from raw.githubusercontent.com */
-  private async fetchRawFile(url: string): Promise<string | null> {
+  /**
+   * Build a GraphQL query that fetches multiple files using aliases.
+   * Requests isTruncated and oid to detect large files that need fallback fetch.
+   */
+  private buildGraphQLBatchQuery(paths: string[], branch: string): string {
+    const fileQueries = paths
+      .map((path, index) => {
+        const fullPath = `${SYNC_DIR}/${path}`;
+        // Escape special characters in path for GraphQL string
+        const escapedPath = fullPath.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
+        return `file${String(index)}: object(expression: "${branch}:${escapedPath}") { ... on Blob { text isTruncated oid } }`;
+      })
+      .join('\n      ');
+
+    return `query {
+  repository(owner: "${this.owner}", name: "${this.repo}") {
+      ${fileQueries}
+  }
+}`;
+  }
+
+  /**
+   * Execute a GraphQL query against GitHub API.
+   * Returns parsed response data or null on error.
+   */
+  private async graphqlFetch(
+    query: string
+  ): Promise<{ repository?: Record<string, unknown> } | null> {
     try {
       const res = await fetchWithRetry(
-        url,
-        { headers: { Authorization: `Bearer ${this.token}` } },
+        'https://api.github.com/graphql',
+        {
+          method: 'POST',
+          headers: {
+            Authorization: `Bearer ${this.token}`,
+            'Content-Type': 'application/json',
+            'X-GitHub-Api-Version': '2022-11-28',
+          },
+          body: JSON.stringify({ query }),
+        },
         this.maxRetries,
         this.retryDelayMs
       );
-      if (!res.ok) return null;
-      return await res.text();
-    } catch {
+
+      if (!res.ok) {
+        this.logProgress(`GraphQL request failed: HTTP ${String(res.status)}`);
+        return null;
+      }
+
+      const data = (await res.json()) as {
+        data?: { repository?: Record<string, unknown> };
+        errors?: { message: string }[];
+      };
+
+      if (data.errors && data.errors.length > 0) {
+        this.logProgress(`GraphQL errors: ${data.errors.map((e) => e.message).join(', ')}`);
+        // Still return partial data if available
+      }
+
+      return data.data ?? null;
+    } catch (error) {
+      this.logProgress(`GraphQL fetch error: ${String(error)}`);
       return null;
     }
   }
@@ -319,38 +375,6 @@ export class RepoStorageBackend implements StorageBackend {
         return null;
       }
       throw error;
-    }
-  }
-
-  private async createOrUpdateFile(path: string, content: string, message: string): Promise<void> {
-    // Get current file SHA if exists (404 means file doesn't exist yet)
-    let sha: string | undefined;
-    try {
-      const existing = await this.fetch(`/contents/${path}`);
-      if (existing.ok) {
-        sha = ((await existing.json()) as ContentFile).sha;
-      }
-    } catch (error) {
-      // 404 is expected for new files
-      if (!(error instanceof RepoApiError && error.status === 404)) {
-        throw error;
-      }
-    }
-
-    const body = JSON.stringify({
-      message,
-      content: Buffer.from(content).toString('base64'),
-      sha,
-    });
-
-    const res = await this.fetch(`/contents/${path}`, { method: 'PUT', body });
-    if (!res.ok) {
-      const errBody = (await res.json().catch(() => ({}))) as { message?: string };
-      throw new RepoApiError(
-        errBody.message ?? 'Failed to create/update file',
-        res.status,
-        errBody
-      );
     }
   }
 
@@ -438,6 +462,35 @@ export class RepoStorageBackend implements StorageBackend {
     }
     const data = (await res.json()) as GitRef;
     return data.object.sha;
+  }
+
+  /**
+   * Get all files in the repo using Tree API (recursive).
+   * Returns null if branch doesn't exist yet.
+   */
+  private async getTreeWithFiles(): Promise<GitTreeEntry[] | null> {
+    try {
+      const branch = await this.getBranch();
+      const res = await this.fetchAllowNotFound(`/git/trees/${branch}?recursive=1`);
+      if (!res?.ok) return null;
+
+      const data = (await res.json()) as GitTreeResponse;
+      return data.tree ?? [];
+    } catch {
+      return null;
+    }
+  }
+
+  /**
+   * Get tree entries filtered to sync directory only.
+   * Returns file entries with their SHAs for blob fetching.
+   */
+  private async getSyncDirTree(): Promise<GitTreeEntry[]> {
+    const tree = await this.getTreeWithFiles();
+    if (!tree) return [];
+
+    // Filter to only files in SYNC_DIR
+    return tree.filter((entry) => entry.type === 'blob' && entry.path.startsWith(`${SYNC_DIR}/`));
   }
 
   /** Get the tree SHA for a commit */
