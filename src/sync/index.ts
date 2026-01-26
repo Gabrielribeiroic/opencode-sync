@@ -11,7 +11,7 @@ export type { SyncEngineOptions } from './engine/index.js';
 // Operations
 export type { CategoryData } from './operations/types.js';
 export { preparePushData, needsPush } from './operations/push.js';
-export { pullCategories, downloadChunks } from './operations/pull.js';
+export { pullCategories } from './operations/pull.js';
 export { mergeAllCategories } from './operations/merge-operation.js';
 
 // Timestamp-based sync (replaces vector clocks)
@@ -40,12 +40,11 @@ export {
   createTombstone,
   isTombstoneExpired,
   filterExpiredTombstones,
-  cleanupExpiredTombstones,
   mergeTombstones,
   isItemTombstoned,
   getItemsToDelete,
   detectLocalDeletions,
-  // TombstonesFile handling (schema 4.0)
+  // TombstonesFile handling (schema 5.0)
   parseTombstonesFile,
   serializeTombstonesFile,
   getCategoryTombstones,

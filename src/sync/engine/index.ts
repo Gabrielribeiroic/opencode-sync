@@ -9,7 +9,7 @@ export { SyncError } from './errors.js';
 export type { SyncEngineOptions } from './types.js';
 export { MANIFEST_FILENAME } from './types.js';
 export { fetchManifest } from './manifest.js';
-export { buildLocalState, isLockedByOther, getStorageFilesMap } from './state.js';
+export { buildLocalState, isLockedByOther } from './state.js';
 export {
   buildPushResult,
   buildPullResult,

@@ -6,7 +6,7 @@
  * on all other machines during the next sync.
  */
 
-import type { Tombstone, ItemCategoryInfo, TombstonesFile } from '../types/manifest.js';
+import type { Tombstone, TombstonesFile } from '../types/manifest.js';
 import type { SyncCategory } from '../types/categories.js';
 import { DEFAULT_TOMBSTONE_GRACE_DAYS, createEmptyTombstonesFile } from '../types/manifest.js';
 
@@ -63,21 +63,6 @@ export function filterExpiredTombstones(
   }
 
   return { valid, expiredIds };
-}
-
-/**
- * Remove expired tombstones from a category info.
- * Returns the cleaned category info and list of expired item IDs.
- */
-export function cleanupExpiredTombstones(
-  info: ItemCategoryInfo,
-  now: Date = new Date()
-): { cleaned: ItemCategoryInfo; expiredIds: string[] } {
-  const { valid, expiredIds } = filterExpiredTombstones(info.tombstones, now);
-  return {
-    cleaned: { ...info, tombstones: valid },
-    expiredIds,
-  };
 }
 
 /**
@@ -160,7 +145,7 @@ export function removeItemsWithTombstones(
 }
 
 // ============================================================================
-// TombstonesFile Handling (Schema 4.0)
+// TombstonesFile Handling (Schema 5.0)
 // ============================================================================
 
 /**

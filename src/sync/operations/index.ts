@@ -5,7 +5,7 @@
  */
 
 export { preparePushData, needsPush } from './push.js';
-export { pullCategories, downloadChunks } from './pull.js';
+export { pullCategories } from './pull.js';
 export { mergeAllCategories } from './merge-operation.js';
 export { maybeEncrypt, maybeDecrypt, parseEncryptedData } from './helpers.js';
 export type {

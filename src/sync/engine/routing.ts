@@ -31,16 +31,15 @@ export function determineAction(
   const remoteTimestamp = remoteManifest.updatedAt;
 
   const cmp = compareTimestamps(localTimestamp, remoteTimestamp);
-  const pushNeeded = cmp === 'equal' ? needsPush(localData, remoteManifest) : false;
+  // Check needsPush for both 'equal' and 'local-newer' cases
+  const pushNeeded = cmp !== 'remote-newer' ? needsPush(localData, remoteManifest) : false;
   syncLog(`[SYNC] Timestamp: ${cmp}, needsPush=${String(pushNeeded)}`);
 
   switch (cmp) {
     case 'equal':
-      // Same timestamp - use checksum to decide
-      return pushNeeded ? { action: 'push' } : { action: 'no-change' };
     case 'local-newer':
-      // Local has newer changes - push them
-      return { action: 'push' };
+      // Same or local newer - only push if there are actual changes
+      return pushNeeded ? { action: 'push' } : { action: 'no-change' };
     case 'remote-newer':
       // Remote has newer changes - pull first, then push if local has changes
       // This implements last-write-wins: remote wins, we'll push our changes after

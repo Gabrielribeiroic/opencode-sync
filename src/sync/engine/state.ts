@@ -4,15 +4,12 @@
  * Handles local state updates after sync operations.
  */
 
-import { calculateChecksum } from '../packer.js';
-import type { StorageBackend } from '../../storage/index.js';
 import type { Manifest, LocalSyncState, SyncCategory } from '../../types/index.js';
-import type { CategoryData, StorageFiles } from '../operations/types.js';
-import { isBlobCategoryData, isItemCategoryData } from '../operations/types.js';
+import type { CategoryData } from '../operations/types.js';
 
 /**
  * Build updated local state after a sync operation.
- * Only tracks base versions for blob categories (used for three-way merge).
+ * All categories use per-item tracking.
  */
 export function buildLocalState(
   manifest: Manifest,
@@ -26,14 +23,8 @@ export function buildLocalState(
   const itemChecksums: Partial<Record<SyncCategory, Record<string, string>>> = {};
 
   for (const item of data) {
-    if (isBlobCategoryData(item)) {
-      // Blob categories: track single checksum and base version for three-way merge
-      checksums[item.category] = calculateChecksum(item.data);
-      baseVersions[item.category] = item.data;
-    } else if (isItemCategoryData(item)) {
-      // Per-item categories: track individual item checksums for deletion detection
-      itemChecksums[item.category] = item.checksums;
-    }
+    // All categories: track individual item checksums for deletion detection
+    itemChecksums[item.category] = item.checksums;
   }
 
   return {
@@ -71,9 +62,7 @@ function buildCategoryMap(data: CategoryData[]): Map<SyncCategory, CategoryData>
 }
 
 /** Merge item category data (local + pulled) */
-import type { ItemCategoryData } from '../operations/types.js';
-
-function mergeItemData(local: ItemCategoryData, pulled: ItemCategoryData): CategoryData {
+function mergeItemData(local: CategoryData, pulled: CategoryData): CategoryData {
   return {
     category: pulled.category,
     type: 'items',
@@ -87,11 +76,8 @@ function processPulledCategory(
   pulled: CategoryData,
   localByCategory: Map<SyncCategory, CategoryData>
 ): CategoryData {
-  if (isBlobCategoryData(pulled)) return pulled;
-  if (!isItemCategoryData(pulled)) return pulled;
-
   const local = localByCategory.get(pulled.category);
-  if (local && isItemCategoryData(local)) {
+  if (local) {
     return mergeItemData(local, pulled);
   }
   return pulled;
@@ -123,19 +109,4 @@ export function mergeDataForState(
   }
 
   return result;
-}
-
-/**
- * Build storage files map from backend listing.
- */
-export async function getStorageFilesMap(backend: StorageBackend): Promise<StorageFiles> {
-  const files = await backend.listFiles();
-  const map: StorageFiles = {};
-  for (const file of files) {
-    const entry: { content?: string; sha?: string } = {};
-    if (file.content !== undefined) entry.content = file.content;
-    if (file.sha !== undefined) entry.sha = file.sha;
-    map[file.filename] = entry;
-  }
-  return map;
 }

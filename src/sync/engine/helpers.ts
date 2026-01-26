@@ -12,13 +12,13 @@ import type {
   Tombstone,
 } from '../../types/index.js';
 import type { CategoryData, PassphraseOption } from '../operations/types.js';
-import { isItemCategoryData } from '../operations/types.js';
 import type { PullOptions } from '../operations/pull.js';
 import type { PreparePushResult } from '../operations/push.js';
 import { preparePushData } from '../operations/push.js';
 
 /**
- * Build checksums map from local item category data for merge-based pull.
+ * Build checksums map from local category data for merge-based pull.
+ * All categories use per-item sync.
  */
 export function buildLocalChecksums(
   localData?: CategoryData[]
@@ -31,9 +31,7 @@ export function buildLocalChecksums(
   >;
 
   for (const catData of localData) {
-    if (isItemCategoryData(catData)) {
-      checksums[catData.category] = catData.checksums;
-    }
+    checksums[catData.category] = catData.checksums;
   }
 
   return Object.keys(checksums).length > 0 ? checksums : undefined;

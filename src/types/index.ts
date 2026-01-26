@@ -18,29 +18,19 @@ export { SYNC_CATEGORIES, isSyncCategory } from './categories.js';
 // Manifest
 export type {
   CategoryInfo,
-  BlobCategoryInfo,
-  ItemCategoryInfo,
+  TreeIndexedCategoryInfo,
   ItemInfo,
   Tombstone,
   AdvisoryLock,
   SyncHistoryEntry,
   Manifest,
-  // Tree-indexed category types (schema 4.0)
-  TreeIndexedCategoryInfo,
   TombstonesFile,
-  ExtendedCategoryInfo,
 } from './manifest.js';
 export {
   createEmptyManifest,
   MAX_SYNC_HISTORY,
-  isItemCategory,
-  isBlobCategory,
-  shouldUseItemSync,
-  ITEM_SYNC_CATEGORIES,
   DEFAULT_TOMBSTONE_GRACE_DAYS,
   CURRENT_SCHEMA_VERSION,
-  // Tree-indexed helpers
-  isTreeIndexedCategory,
   TOMBSTONES_FILENAME,
   createEmptyTombstonesFile,
 } from './manifest.js';

@@ -15,18 +15,7 @@ import type {
 } from '../../types/index.js';
 
 /**
- * Blob-based category data (config, state, credentials, projects, todos).
- * All data packed into a single blob.
- */
-export interface BlobCategoryData {
-  category: SyncCategory;
-  type: 'blob';
-  data: string;
-  isJsonl?: boolean;
-}
-
-/**
- * Per-item category data (sessions, messages).
+ * Per-item category data (all categories use tree-indexed sync).
  * Each item tracked separately for granular sync.
  */
 export interface ItemCategoryData {
@@ -40,18 +29,8 @@ export interface ItemCategoryData {
   tombstones?: Record<string, Tombstone>;
 }
 
-/** Union type for category data */
-export type CategoryData = BlobCategoryData | ItemCategoryData;
-
-/** Check if category data is blob-based */
-export function isBlobCategoryData(data: CategoryData): data is BlobCategoryData {
-  return data.type === 'blob';
-}
-
-/** Check if category data is item-based */
-export function isItemCategoryData(data: CategoryData): data is ItemCategoryData {
-  return data.type === 'items';
-}
+/** Category data type (all categories use item-based sync) */
+export type CategoryData = ItemCategoryData;
 
 /** Storage files structure (backend-agnostic) */
 export type StorageFiles = Record<string, { content?: string; sha?: string }>;

@@ -2,7 +2,7 @@
  * Category Loader
  *
  * Load data for sync categories.
- * Supports both blob-based (config, state, etc.) and per-item (sessions, messages) loading.
+ * All categories use per-item (tree-indexed) loading - each file synced individually.
  */
 
 import { readFile, readdir, stat } from 'node:fs/promises';
@@ -10,10 +10,8 @@ import { join, basename } from 'node:path';
 import type { SyncCategory, PathConfig, SyncConfig } from '../types/index.js';
 import type { LocalSyncState } from '../types/sync.js';
 import type { Tombstone } from '../types/manifest.js';
-import { shouldUseItemSync } from '../types/manifest.js';
 import { getCategoryPaths } from '../types/paths.js';
-import type { CategoryData, BlobCategoryData, ItemCategoryData } from '../sync/operations/types.js';
-import { loadSinglePath, getPathKey } from './directory-loader.js';
+import type { CategoryData, ItemCategoryData } from '../sync/operations/types.js';
 import { calculateChecksum } from '../sync/item-packer.js';
 import { createTombstone, detectLocalDeletions } from '../sync/tombstone.js';
 
@@ -53,7 +51,7 @@ export async function loadLocalData(
     if (!enabledCategories[category as SyncCategory]) continue;
 
     try {
-      const data = await loadCategoryData(category as SyncCategory, paths, options);
+      const data = await loadItemCategoryData(category as SyncCategory, paths, options);
       if (data) categories.push(data);
     } catch (error) {
       const firstPath = paths[0];
@@ -71,46 +69,7 @@ export async function loadLocalData(
 }
 
 /**
- * Load data for a single category.
- * Routes to blob or per-item loading based on category.
- */
-async function loadCategoryData(
-  category: SyncCategory,
-  paths: string[],
-  options: LoadOptions
-): Promise<CategoryData | null> {
-  if (shouldUseItemSync(category)) {
-    return loadItemCategoryData(category, paths, options);
-  }
-  return loadBlobCategoryData(category, paths);
-}
-
-/**
- * Load blob-based category data (legacy approach).
- */
-async function loadBlobCategoryData(
-  category: SyncCategory,
-  paths: string[]
-): Promise<BlobCategoryData | null> {
-  const categoryData: Record<string, unknown> = {};
-  let hasData = false;
-
-  for (const basePath of paths) {
-    const result = await loadSinglePath(basePath);
-    if (result !== null) {
-      categoryData[getPathKey(basePath)] = result;
-      hasData = true;
-    }
-  }
-
-  if (!hasData) return null;
-
-  const isJsonl = category === 'state';
-  return { category, type: 'blob', data: JSON.stringify(categoryData), isJsonl };
-}
-
-/**
- * Load per-item category data (sessions, messages).
+ * Load per-item category data.
  * Each file is loaded as a separate item with its own checksum.
  * Also detects locally deleted items and creates tombstones for them.
  */

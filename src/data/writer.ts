@@ -2,7 +2,7 @@
  * Data Writer
  *
  * Writes synced data back to local filesystem.
- * Supports both blob-based overwrite and per-item merge writes.
+ * All categories use per-item writes.
  */
 
 import { mkdir, writeFile, unlink } from 'node:fs/promises';
@@ -10,12 +10,10 @@ import { join, dirname } from 'node:path';
 import type { PathConfig, SyncCategory } from '../types/index.js';
 import { getCategoryPaths } from '../types/paths.js';
 import type { CategoryData, ItemCategoryData } from '../sync/operations/types.js';
-import { isBlobCategoryData, isItemCategoryData } from '../sync/operations/types.js';
 
 /**
  * Write synced data back to local filesystem.
- * - Blob categories: overwrites local data
- * - Item categories: merges new items (does NOT overwrite existing)
+ * All categories use per-item writes.
  */
 export async function writeLocalData(
   pathConfig: PathConfig,
@@ -27,28 +25,8 @@ export async function writeLocalData(
     const paths = categoryPaths[catData.category];
     if (paths.length === 0) continue;
 
-    if (isItemCategoryData(catData)) {
-      // Per-item merge write
-      await writeItemCategoryData(catData.category, paths, catData);
-    } else if (isBlobCategoryData(catData)) {
-      // Blob overwrite
-      const parsed = JSON.parse(catData.data) as Record<string, unknown>;
-      await writeBlobCategoryData(paths, parsed);
-    }
-  }
-}
-
-/**
- * Write blob-based category data to filesystem (overwrites).
- */
-async function writeBlobCategoryData(
-  paths: string[],
-  data: Record<string, unknown>
-): Promise<void> {
-  for (const [key, value] of Object.entries(data)) {
-    const targetPath = findTargetPath(paths, key);
-    if (targetPath === undefined) continue;
-    await writeEntry(targetPath, value);
+    // Per-item write
+    await writeItemCategoryData(catData.category, paths, catData);
   }
 }
 
@@ -97,67 +75,6 @@ async function writeItemFile(filePath: string, content: string): Promise<void> {
   } catch (error) {
     console.error(`Failed to write item ${filePath}:`, error);
   }
-}
-
-/**
- * Find target path for a key.
- */
-function findTargetPath(paths: string[], key: string): string | undefined {
-  return paths.find((p) => p.endsWith(key)) ?? paths[0];
-}
-
-/**
- * Write a single entry (file or directory).
- */
-async function writeEntry(targetPath: string, value: unknown): Promise<void> {
-  try {
-    if (isDirectoryValue(value)) {
-      await mkdir(targetPath, { recursive: true });
-      await writeDirectoryData(targetPath, value as Record<string, unknown>);
-    } else {
-      await ensureParentDir(targetPath);
-      const content = serializeContent(targetPath, value);
-      await writeFile(targetPath, content, 'utf-8');
-    }
-  } catch (error) {
-    console.error(`Failed to write ${targetPath}:`, error);
-  }
-}
-
-/**
- * Check if value represents a directory.
- */
-function isDirectoryValue(value: unknown): boolean {
-  return typeof value === 'object' && value !== null && !Array.isArray(value);
-}
-
-/**
- * Write directory contents recursively.
- */
-async function writeDirectoryData(dirPath: string, data: Record<string, unknown>): Promise<void> {
-  for (const [name, value] of Object.entries(data)) {
-    const fullPath = join(dirPath, name);
-    await writeEntry(fullPath, value);
-  }
-}
-
-/**
- * Serialize content based on file type.
- */
-function serializeContent(filePath: string, value: unknown): string {
-  if (filePath.endsWith('.json')) {
-    return JSON.stringify(value, null, 2);
-  }
-
-  if (filePath.endsWith('.jsonl') && Array.isArray(value)) {
-    return value.map((item) => JSON.stringify(item)).join('\n');
-  }
-
-  if (typeof value === 'string') {
-    return value;
-  }
-
-  return JSON.stringify(value, null, 2);
 }
 
 /**

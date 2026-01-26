@@ -11,7 +11,7 @@ import { pullCategories } from '../operations/pull.js';
 import { mergeAllCategories } from '../operations/merge-operation.js';
 import { syncLog } from './logger.js';
 import { MANIFEST_FILENAME } from './types.js';
-import { buildLocalState, getStorageFilesMap, mergeDataForState } from './state.js';
+import { buildLocalState, mergeDataForState } from './state.js';
 import {
   buildPushResult,
   buildPullResult,
@@ -72,11 +72,9 @@ export async function executePullOperation(
   data?: CategoryData[]
 ): Promise<{ result: SyncResult; newState: LocalSyncState | null }> {
   if (!remote) return { result: buildErrorResult('No remote data found'), newState: null };
-  const sf = await getStorageFilesMap(ctx.backend);
   const opts = buildPullOptions(
     {
       manifest: remote,
-      storageFiles: sf,
       enabledCategories: ctx.config.sync,
       passphrase: buildCryptoOptions(ctx.passphrase, ctx.oldPassphrase),
       backend: ctx.backend,
@@ -105,15 +103,13 @@ export async function executeConflictOperation(
   manifest: Manifest,
   retry: number
 ): Promise<SyncResult> {
-  const sf = await getStorageFilesMap(ctx.backend);
   const mergeCtx = {
     remoteManifest: manifest,
-    storageFiles: sf,
     localState: ctx.localState,
     passphrase: buildCryptoOptions(ctx.passphrase, ctx.oldPassphrase),
     machineId: ctx.config.machineId,
     backend: ctx.backend,
   };
-  const { mergedData, conflicts } = await mergeAllCategories(data, mergeCtx);
+  const { mergedData, conflicts } = mergeAllCategories(data, mergeCtx);
   return buildConflictResult(await ctx.pushFn(mergedData, retry, manifest), conflicts);
 }

@@ -83,7 +83,7 @@ export function createManifest(
 ): Manifest {
   return {
     version: (localState?.lastSyncedVersion ?? 0) + 1,
-    schemaVersion: '4.0',
+    schemaVersion: '5.0',
     createdAt: localState?.lastSyncedAt ?? now,
     updatedAt: now,
     lastUpdatedBy: machineId,

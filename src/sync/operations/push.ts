@@ -1,9 +1,7 @@
 /** Push Operation - Pushes local data to remote storage. */
 
-import { packCategory, calculateChecksum } from '../packer.js';
 import { packItem, buildItemInfo, diffItems } from '../item-packer.js';
 import {
-  maybeEncrypt,
   processTombstonesForPush,
   removeItemsById,
   addSyncHistory,
@@ -11,10 +9,8 @@ import {
   buildPushContext,
 } from './helpers.js';
 import {
-  type ItemCategoryInfo,
   type ItemInfo,
   type TreeIndexedCategoryInfo,
-  type ExtendedCategoryInfo,
   TOMBSTONES_FILENAME,
 } from '../../types/index.js';
 import type { Tombstone } from '../../types/manifest.js';
@@ -33,15 +29,6 @@ import type {
   SyncCategory,
   PreparePushOptions,
 } from './types.js';
-import { isBlobCategoryData, isItemCategoryData } from './types.js';
-
-/** Manifest category entry type (includes all category types) */
-type ManifestCategoryEntry = ExtendedCategoryInfo;
-
-/** Local type guard for item category info (excludes tree-indexed refs) */
-function isItemCatInfo(info: ManifestCategoryEntry): info is ItemCategoryInfo {
-  return info.type === 'items';
-}
 
 /** Result of preparing push data */
 export interface PreparePushResult {
@@ -69,57 +56,14 @@ export function preparePushData(opts: PreparePushOptions): PreparePushResult {
   return { files: ctx.files, manifest: ctx.manifest, changedCategories };
 }
 
-/** Extract remote item category data if available */
-function getRemoteItemData(
-  remoteManifest: Manifest | undefined,
-  category: SyncCategory
-): { items: Record<string, ItemInfo>; tombstones: Record<string, Tombstone> } {
-  const info = remoteManifest?.categories[category];
-  if (info?.type === 'items') {
-    return { items: info.items, tombstones: info.tombstones };
-  }
-  return { items: {}, tombstones: {} };
-}
-
-/** Pack category data based on type (blob or items) */
+/** Pack category data (all categories use tree-indexed sync) */
 function packCategoryData(
   catData: CategoryData,
-  remoteManifest: Manifest | undefined,
+  _remoteManifest: Manifest | undefined,
   ctx: PushContext
 ): string[] {
-  if (isItemCategoryData(catData)) {
-    const { items, tombstones } = getRemoteItemData(remoteManifest, catData.category);
-    return packItemCategoryData(catData, items, ctx, tombstones);
-  }
-  if (isBlobCategoryData(catData)) {
-    return packBlobCategoryData(catData.category, catData.data, ctx);
-  }
-  return [];
-}
-
-/**
- * Pack blob-based category data (legacy approach).
- * Returns list of filenames created.
- */
-function packBlobCategoryData(category: SyncCategory, data: string, ctx: PushContext): string[] {
-  const dataToStore = maybeEncrypt(category, data, ctx.passphrase);
-  const packed = packCategory(category, dataToStore);
-
-  for (const chunk of packed.chunks) {
-    ctx.files[chunk.filename] = { content: chunk.content };
-  }
-
-  ctx.manifest.categories[category] = {
-    type: 'blob',
-    files: packed.chunks.map((c) => c.filename),
-    totalSize: packed.totalSize,
-    compressedSize: packed.compressedSize,
-    checksum: packed.checksum,
-    lastModified: ctx.now,
-    lastModifiedBy: ctx.machineId,
-  };
-
-  return packed.chunks.map((c) => c.filename);
+  // All categories now use tree-indexed sync, no remote item tracking needed
+  return packItemCategoryData(catData, {}, ctx, {});
 }
 
 /** Result of processing items for push */
@@ -158,8 +102,8 @@ function processItemsForUpload(
 }
 
 /**
- * Pack per-item category data (sessions, messages).
- * Uses tree-indexed approach: items stored as individual files, tombstones in separate file.
+ * Pack category data using tree-indexed approach.
+ * Items stored as individual files, tombstones in separate file.
  */
 function packItemCategoryData(
   catData: ItemCategoryData,
@@ -177,16 +121,15 @@ function packItemCategoryData(
   }
   const newItems = removeItemsById(processed, tombResult.itemsToRemove);
 
-  // Write tree-indexed category reference to manifest (no per-item metadata in manifest)
+  // Write tree-indexed category reference to manifest
   writeTreeIndexedCategory(category, newItems, tombResult.tombstones, ctx);
 
-  // Return item filenames (Tree API will discover these)
+  // Return item filenames
   return filenames;
 }
 
 /**
  * Write a tree-indexed category to manifest and update tombstones file.
- * Tree-indexed categories don't track per-item metadata in manifest.
  */
 function writeTreeIndexedCategory(
   category: SyncCategory,
@@ -194,10 +137,8 @@ function writeTreeIndexedCategory(
   tombstones: Record<string, Tombstone>,
   ctx: PushContext
 ): void {
-  // Get path prefix for the category
   const pathPrefix = `${category}/`;
 
-  // Write tree-indexed reference to manifest
   ctx.manifest.categories[category] = {
     type: 'tree-indexed',
     pathPrefix,
@@ -219,29 +160,24 @@ function writeTreeIndexedCategory(
 }
 
 /**
- * Check if local data needs pushing by comparing checksums.
- * For tree-indexed categories, we skip detailed comparison
- * since we rely on timestamp comparison for sync direction.
+ * Check if local data needs pushing.
+ * Compares local item counts against remote manifest.
  */
 export function needsPush(localData: CategoryData[], remoteManifest: Manifest | null): boolean {
   if (!remoteManifest) return true;
 
   for (const catData of localData) {
     const remoteInfo = remoteManifest.categories[catData.category];
+    if (!remoteInfo) return true;
 
-    if (isItemCategoryData(catData)) {
-      // Per-item comparison - but only if remote is also items type
-      if (!remoteInfo) return true;
-      // Skip comparison for tree-indexed - they use timestamp comparison
-      if (remoteInfo.type === 'tree-indexed') continue;
-      if (!isItemCatInfo(remoteInfo)) return true;
-      const diff = diffItems(catData.checksums, remoteInfo.items);
-      if (diff.toUpload.length > 0) return true;
-    } else if (isBlobCategoryData(catData)) {
-      // Blob comparison
-      const localChecksum = calculateChecksum(catData.data);
-      if (!remoteInfo || !('checksum' in remoteInfo)) return true;
-      if (localChecksum !== remoteInfo.checksum) return true;
+    // Compare item counts - if local has different count, needs push
+    const localCount = Object.keys(catData.items).length;
+    const remoteCount = remoteInfo.itemCount;
+    if (localCount !== remoteCount) return true;
+
+    // Also check for tombstones (deletions)
+    if (catData.tombstones && Object.keys(catData.tombstones).length > 0) {
+      return true;
     }
   }
 
