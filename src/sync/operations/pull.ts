@@ -118,6 +118,7 @@ function processDownloadedFiles(
       const unpacked = unpackItem(filename, content);
       items[itemId] = unpacked.content;
       checksums[itemId] = unpacked.checksum;
+      syncLog(`[PULL] ${filename}`);
     } catch (error) {
       syncLog(`[PULL] Failed to unpack ${itemId}: ${String(error)}`);
     }

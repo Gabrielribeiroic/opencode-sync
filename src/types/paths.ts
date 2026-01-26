@@ -36,7 +36,11 @@ export function getCategoryPaths(pathConfig: PathConfig): Record<SyncCategory, s
       `${pathConfig.configDir}/commands`,
       `${pathConfig.configDir}/plugins`,
     ],
-    state: [`${pathConfig.stateDir}/model.json`, `${pathConfig.stateDir}/prompt-history.jsonl`],
+    state: [
+      `${pathConfig.stateDir}/model.json`,
+      `${pathConfig.stateDir}/prompt-history.jsonl`,
+      `${pathConfig.stateDir}/kv.json`,
+    ],
     credentials: [`${pathConfig.dataDir}/auth.json`, `${pathConfig.dataDir}/mcp-auth.json`],
     sessions: [`${pathConfig.dataDir}/storage/session`],
     messages: [`${pathConfig.dataDir}/storage/message`, `${pathConfig.dataDir}/storage/part`],

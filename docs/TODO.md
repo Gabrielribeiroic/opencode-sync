@@ -55,6 +55,81 @@
 - [x] **Dead code: unused `removeItemsWithTombstones`** - Function in `tombstone.ts` was never imported
   - Removed unused function
 
+## Dead Code Cleanup (knip analysis)
+
+### Unused Files (11)
+- [ ] `src/crypto/index.ts` - barrel export, check if needed for external API
+- [ ] `src/data/directory-loader.ts`
+- [ ] `src/data/parsers.ts`
+- [ ] `src/sync/index.ts` - barrel export, check if needed for external API
+- [ ] `src/sync/merge/` - entire directory (index.ts, json-merge.ts, jsonl-merge.ts, types.ts, utils.ts)
+- [ ] `src/sync/operations/index.ts` - barrel export, check if needed for external API
+- [ ] `src/sync/packer.ts`
+
+### Unused Dependencies
+- [ ] `@opencode-ai/plugin` - verify if peer/runtime dependency
+- [ ] `eslint-plugin-import` - remove if not used
+
+### Unused Exports - Crypto (4)
+- [ ] `deriveKey` in `src/crypto/encrypt.ts`
+- [ ] `generateSalt` in `src/crypto/encrypt.ts`
+- [ ] `hashPassphrase` in `src/crypto/encrypt.ts`
+- [ ] `verifyPassphrase` in `src/crypto/encrypt.ts`
+
+### Unused Exports - Data (2)
+- [ ] `ensureDir` in `src/data/file-io.ts`
+- [ ] `createInitialConfig` in `src/data/state.ts`
+
+### Unused Exports - Logging (3)
+- [ ] `fileLogger` in `src/logging/file-logger.ts`
+- [ ] `syncDebug` in `src/logging/file-logger.ts`
+- [ ] `startOperation` in `src/logging/file-logger.ts`
+
+### Unused Exports - Sync Engine (15+)
+- [ ] `buildLocalChecksums` in `src/sync/engine/helpers.ts`
+- [ ] `MAX_CONFLICT_RETRIES` in `src/sync/engine/retry.ts`
+- [ ] Multiple re-exports in `src/sync/engine/index.ts`
+
+### Unused Exports - Tombstones (6)
+- [ ] `isTombstoneExpired` in `src/sync/tombstone.ts`
+- [ ] `isItemTombstoned` in `src/sync/tombstone.ts`
+- [ ] `getItemsToDelete` in `src/sync/tombstone.ts`
+- [ ] `addTombstone` re-export in `src/sync/tombstone.ts`
+- [ ] `mergeTombstonesFiles` re-export in `src/sync/tombstone.ts`
+- [ ] `filterExpiredTombstonesFile` re-export in `src/sync/tombstone.ts`
+
+### Unused Exports - Operations (6)
+- [ ] `maybeEncrypt` in `src/sync/operations/crypto-helpers.ts`
+- [ ] `maybeDecrypt` in `src/sync/operations/crypto-helpers.ts`
+- [ ] `parseEncryptedData` in `src/sync/operations/crypto-helpers.ts`
+- [ ] `createManifest` in `src/sync/operations/helpers.ts`
+- [ ] `getLockFilePath` in `src/sync/local-lock.ts`
+- [ ] `readLock` in `src/sync/local-lock.ts`
+- [ ] `withLocalLock` in `src/sync/local-lock.ts`
+
+### Unused Exports - Shared (7)
+- [ ] `isError` in `src/shared/error-utils.ts`
+- [ ] `processSyncResult` in `src/shared/sync-result-handler.ts`
+- [ ] `AppError`, `PackerError`, `SyncError`, `MergeError`, `RepoNotFoundError` classes
+
+### Unused Exports - Types (10+)
+- [ ] `SYNC_CATEGORIES` in `src/types/categories.ts`
+- [ ] `isSyncCategory` in `src/types/categories.ts`
+- [ ] `DEFAULT_TOMBSTONE_GRACE_DAYS`, `CURRENT_SCHEMA_VERSION`, `createEmptyTombstonesFile` in `src/types/index.ts`
+- [ ] `getCategoryForPath` in `src/types/paths.ts`
+
+### Unused Exported Types (22)
+- [ ] `LoadedData`, `LoadError` in `src/data/index.ts`
+- [ ] `PluginState` in `src/plugin/index.ts`
+- [ ] `MergeConflict`, `StateProvider` in `src/shared/`
+- [ ] `SyncAction` in `src/sync/engine/routing.ts`
+- [ ] `ItemDiff` in `src/sync/item-packer.ts`
+- [ ] `CryptoOptions` duplicate exports
+- [ ] `StorageFiles`, `OperationContext`, `ChunkDownloadResult`, `SyncResult` in `src/sync/operations/types.ts`
+- [ ] `CategoryInfo`, `AdvisoryLock`, `TombstonesFile`, `PackedCategory`, `LogLevel` in `src/types/`
+
+**Note:** Many "unused" exports may be intentional public API for package consumers. Review before removing.
+
 ## In Progress: Safety & Observability
 
 - [ ] Log when local files are overwritten by remote

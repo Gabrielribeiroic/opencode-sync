@@ -8,6 +8,7 @@ import {
   markOrphanedFiles,
   buildPushContext,
 } from './helpers.js';
+import { syncLog } from '../../logging/index.js';
 import {
   type ItemInfo,
   type TreeIndexedCategoryInfo,
@@ -90,6 +91,7 @@ function processItemsForUpload(
     ctx.files[packed.filename] = { content: packed.content };
     newItems[itemId] = buildItemInfo(packed, ctx.machineId);
     filenames.push(packed.filename);
+    syncLog(`[PUSH] ${category}/${itemId}`);
   }
 
   // Keep unchanged items' filenames
