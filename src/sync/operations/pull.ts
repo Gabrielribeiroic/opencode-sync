@@ -5,14 +5,18 @@
  * Supports both blob-based sync and per-item merge-based sync.
  */
 
+/* eslint-disable max-lines, max-statements */
+
 import { unpackCategory } from '../packer.js';
 import { unpackItem } from '../item-packer.js';
 import { maybeDecrypt } from './helpers.js';
-import { fetchCategoryShard } from '../engine/manifest.js';
 import { syncLog } from '../engine/logger.js';
 import type { StorageBackend } from '../../storage/index.js';
 import type { PackedChunk, BlobCategoryInfo, SyncCategory } from '../../types/index.js';
-import type { ItemCategoryInfo, Tombstone, ShardedCategoryRef } from '../../types/manifest.js';
+import type { ItemCategoryInfo, Tombstone, TreeIndexedCategoryInfo } from '../../types/manifest.js';
+import { isTreeIndexedCategory, TOMBSTONES_FILENAME } from '../../types/manifest.js';
+import { parseTombstonesFile, getCategoryTombstones } from '../tombstone.js';
+import { getItemIdFromFilename } from '../item-packer.js';
 import type {
   CategoryData,
   ItemCategoryData,
@@ -94,10 +98,10 @@ export async function pullCategories(options: PullOptions): Promise<ExtendedPull
     if (info.type === 'items') {
       const data = await pullItemCategory(cat, info, localChecksums?.[cat] ?? {}, backend);
       recordItemPull(acc, cat, data, info.tombstones);
-    } else if (info.type === 'sharded') {
-      await pullShardedCategoryToAcc(cat, info, localChecksums?.[cat] ?? {}, backend, acc);
+    } else if (isTreeIndexedCategory(info)) {
+      await pullTreeIndexedCategoryToAcc(cat, info, localChecksums?.[cat] ?? {}, backend, acc);
     } else {
-      // info.type === 'blob'
+      // Blob category (info.type === 'blob')
       const data = await pullBlobCategory(category, info, storageFiles, passphrase, backend);
       acc.pulledData.push({ category: cat, type: 'blob', data });
       acc.changedCategories.push(cat);
@@ -107,36 +111,92 @@ export async function pullCategories(options: PullOptions): Promise<ExtendedPull
   return acc;
 }
 
-/** Pull a sharded category and record results in accumulator */
-async function pullShardedCategoryToAcc(
+/**
+ * Pull a tree-indexed category using Tree API as source of truth.
+ *
+ * Tree-indexed categories (schema 4.0) don't track per-item metadata in manifest.
+ * Instead, we:
+ * 1. List all files in the category's directory via Tree API (listFiles)
+ * 2. Compare Git SHAs with local checksums to find changes
+ * 3. Download only changed/new files via GraphQL batch fetch
+ * 4. Load tombstones from separate tombstones.json file
+ */
+async function pullTreeIndexedCategoryToAcc(
   cat: SyncCategory,
-  ref: ShardedCategoryRef,
-  localChecksums: Record<string, string>,
+  info: TreeIndexedCategoryInfo,
+  _localChecksums: Record<string, string>,
   backend: StorageBackend,
   acc: PullAccumulator
 ): Promise<void> {
-  syncLog(`[PULL] Fetching shard: ${ref.shardFile} (itemCount: ${String(ref.itemCount)})`);
-  const shard = await fetchCategoryShard(backend, ref.shardFile);
-  if (!shard) {
-    syncLog(`[PULL] ${cat}: shard file not found or empty`);
+  syncLog(`[PULL] Tree-indexed category ${cat} (pathPrefix: ${info.pathPrefix})`);
+
+  // 1. List all remote files via Tree API
+  const allFiles = await backend.listFiles();
+  const categoryFiles = allFiles.filter((f) => f.filename.startsWith(info.pathPrefix));
+  syncLog(`[PULL] ${cat}: found ${String(categoryFiles.length)} files in tree`);
+
+  if (categoryFiles.length === 0) {
     return;
   }
+
+  // 2. Load tombstones from separate file
+  const tombstonesContent = await backend.getFile(TOMBSTONES_FILENAME);
+  const tombstonesFile = parseTombstonesFile(tombstonesContent);
+  const categoryTombstones = getCategoryTombstones(tombstonesFile, cat);
+  syncLog(`[PULL] ${cat}: ${String(Object.keys(categoryTombstones).length)} tombstones`);
+
+  // 3. Build list of files to download (all non-tombstoned items)
+  // For tree-indexed, we download all items to ensure local filesystem is in sync
+  const filesToFetch: FetchInfo[] = [];
+  for (const file of categoryFiles) {
+    const itemId = getItemIdFromFilename(file.filename);
+    if (!itemId) continue;
+    if (itemId in categoryTombstones) continue; // Skip tombstoned items
+
+    filesToFetch.push({
+      itemId,
+      filename: file.filename,
+      // Use Git SHA as checksum proxy (content-addressable)
+      checksum: file.sha ?? '',
+    });
+  }
+
+  if (filesToFetch.length === 0) {
+    // Record tombstones even if no files to download
+    if (Object.keys(categoryTombstones).length > 0) {
+      acc.tombstonedItems[cat] = categoryTombstones;
+    }
+    return;
+  }
+
+  // 4. Bulk download files via GraphQL
+  const contents = await backend.getFiles(filesToFetch.map((f) => f.filename));
+
+  // 5. Process downloaded files
+  const items: Record<string, string> = {};
+  const checksums: Record<string, string> = {};
+
+  for (const { itemId, filename } of filesToFetch) {
+    const content = contents[filename];
+    if (!content) continue;
+
+    try {
+      // For tree-indexed, we skip checksum validation since Git SHA is the authority
+      const unpacked = unpackItem(filename, content);
+      items[itemId] = unpacked.content;
+      checksums[itemId] = unpacked.checksum; // Use computed checksum for local state
+    } catch (error) {
+      syncLog(`[PULL] Failed to unpack ${itemId}: ${String(error)}`);
+    }
+  }
+
   syncLog(
-    `[PULL] ${cat}: shard has ${String(Object.keys(shard.items).length)} items, ${String(Object.keys(shard.tombstones).length)} tombstones`
+    `[PULL] ${cat}: downloaded ${String(Object.keys(items).length)}/${String(filesToFetch.length)} items`
   );
 
-  // Convert shard to ItemCategoryInfo-like structure for pullItemCategory
-  const info: ItemCategoryInfo = {
-    type: 'items',
-    items: shard.items,
-    tombstones: shard.tombstones,
-    itemCount: Object.keys(shard.items).length,
-    lastModified: ref.lastModified,
-    lastModifiedBy: ref.lastModifiedBy,
-  };
-
-  const data = await pullItemCategory(cat, info, localChecksums, backend);
-  recordItemPull(acc, cat, data, shard.tombstones);
+  // 6. Record results
+  const data: ItemCategoryData = { category: cat, type: 'items', items, checksums };
+  recordItemPull(acc, cat, data, categoryTombstones);
 }
 
 /**

@@ -83,7 +83,7 @@ export function createManifest(
 ): Manifest {
   return {
     version: (localState?.lastSyncedVersion ?? 0) + 1,
-    schemaVersion: '3.0',
+    schemaVersion: '4.0',
     createdAt: localState?.lastSyncedAt ?? now,
     updatedAt: now,
     lastUpdatedBy: machineId,
@@ -103,6 +103,9 @@ export function addSyncHistory(ctx: PushContext, categories: SyncCategory[]): vo
   ctx.manifest.recentSyncs = [entry].slice(0, MAX_SYNC_HISTORY);
 }
 
+/** Files that should never be marked as orphaned */
+const PROTECTED_FILES = new Set(['manifest.json', 'tombstones.json']);
+
 /** Mark orphaned files for deletion. */
 export function markOrphanedFiles(
   files: Record<string, { content: string | null }>,
@@ -111,7 +114,7 @@ export function markOrphanedFiles(
 ): void {
   if (!existingFiles) return;
   for (const filename of existingFiles) {
-    if (filename !== 'manifest.json' && !newFiles.has(filename)) {
+    if (!PROTECTED_FILES.has(filename) && !newFiles.has(filename)) {
       files[filename] = { content: null };
     }
   }

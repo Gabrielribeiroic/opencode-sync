@@ -25,9 +25,9 @@ export type {
   AdvisoryLock,
   SyncHistoryEntry,
   Manifest,
-  // Sharded manifest types
-  ShardedCategoryRef,
-  CategoryShard,
+  // Tree-indexed category types (schema 4.0)
+  TreeIndexedCategoryInfo,
+  TombstonesFile,
   ExtendedCategoryInfo,
 } from './manifest.js';
 export {
@@ -38,9 +38,11 @@ export {
   shouldUseItemSync,
   ITEM_SYNC_CATEGORIES,
   DEFAULT_TOMBSTONE_GRACE_DAYS,
-  // Sharded manifest helpers
-  isShardedRef,
-  getShardFilename,
+  CURRENT_SCHEMA_VERSION,
+  // Tree-indexed helpers
+  isTreeIndexedCategory,
+  TOMBSTONES_FILENAME,
+  createEmptyTombstonesFile,
 } from './manifest.js';
 
 // Sync Operations

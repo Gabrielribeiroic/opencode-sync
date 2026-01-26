@@ -85,54 +85,61 @@ export function shouldUseItemSync(category: SyncCategory): boolean {
 }
 
 /**
- * Sharded Manifest Support
+ * Tree-Indexed Category Support (Schema 4.0)
  *
- * For categories with many items (sessions, messages), the manifest can grow large.
- * Sharding splits category metadata into separate files:
- * - Root manifest: lightweight, contains category checksums + shard references
- * - Category shards: per-category files with detailed item info
+ * For categories with many items (sessions, messages), we use Git Tree API
+ * as the source of truth instead of tracking per-item metadata in manifest.
+ *
+ * Benefits:
+ * - Manifest stays small (no per-item tracking)
+ * - Tree API returns file list + SHAs in 1 call (100K file limit)
+ * - Tombstones stored separately in tombstones.json
  */
 
-/** Summary info for a sharded category (stored in root manifest) */
-export interface ShardedCategoryRef {
-  type: 'sharded';
-  /** Filename of the shard (e.g., "manifest-sessions.json") */
-  shardFile: string;
-  /** SHA-256 of the shard file content */
-  shardChecksum: string;
-  /** Total number of items (for quick display without loading shard) */
+/** Tree-indexed category info (uses Git Tree API as source of truth) */
+export interface TreeIndexedCategoryInfo {
+  type: 'tree-indexed';
+  /** Directory prefix in storage (e.g., "sessions/", "messages/") */
+  pathPrefix: string;
+  /** Total number of items (cached for quick display, updated on push) */
   itemCount: number;
-  /** Number of tombstones (for metrics) */
-  tombstoneCount: number;
   lastModified: string; // ISO timestamp - used for sync decisions
-  lastModifiedBy: string;
+  lastModifiedBy: string; // Machine ID
 }
 
-/** Extended category info union including sharded reference */
-export type ExtendedCategoryInfo = CategoryInfo | ShardedCategoryRef;
-
-/** Check if category info is a sharded reference */
-export function isShardedRef(info: ExtendedCategoryInfo): info is ShardedCategoryRef {
-  return info.type === 'sharded';
+/** Check if category uses tree-indexed sync */
+export function isTreeIndexedCategory(info: ExtendedCategoryInfo): info is TreeIndexedCategoryInfo {
+  return info.type === 'tree-indexed';
 }
 
-/** Get shard filename for a category */
-export function getShardFilename(category: SyncCategory): string {
-  return `manifest-${category}.json`;
-}
+/** Extended category info union including all types */
+export type ExtendedCategoryInfo = CategoryInfo | TreeIndexedCategoryInfo;
 
-/** Content of a category shard file */
-export interface CategoryShard {
-  /** Category this shard belongs to */
-  category: SyncCategory;
-  /** Schema version for forward compatibility */
+/**
+ * Tombstones File (tombstones.json)
+ *
+ * Separate file for tracking deleted items. This allows:
+ * - Append-only semantics (merge-friendly)
+ * - Small manifest (no tombstones inline)
+ * - Easy cleanup of expired tombstones
+ */
+export interface TombstonesFile {
   schemaVersion: '1.0';
-  /** Map of item ID → item metadata */
-  items: Record<string, ItemInfo>;
-  /** Map of item ID → tombstone for deleted items */
-  tombstones: Record<string, Tombstone>;
-  /** Last updated timestamp */
+  /** Map of category → { itemId → tombstone } */
+  tombstones: Partial<Record<SyncCategory, Record<string, Tombstone>>>;
   updatedAt: string;
+}
+
+/** Tombstones filename */
+export const TOMBSTONES_FILENAME = 'tombstones.json';
+
+/** Create empty tombstones file */
+export function createEmptyTombstonesFile(): TombstonesFile {
+  return {
+    schemaVersion: '1.0',
+    tombstones: {},
+    updatedAt: new Date().toISOString(),
+  };
 }
 
 export interface AdvisoryLock {
@@ -150,13 +157,13 @@ export interface SyncHistoryEntry {
 
 export interface Manifest {
   version: number; // Incremented on each push
-  schemaVersion: '1.0' | '2.0' | '2.1' | '3.0'; // 3.0 removes vector clocks
+  schemaVersion: '1.0' | '2.0' | '2.1' | '3.0' | '4.0'; // 4.0 uses tree-indexed categories
   createdAt: string;
   updatedAt: string; // ISO timestamp - used for sync direction decisions
   lastUpdatedBy: string; // Machine ID
 
-  // Per-category tracking (supports blob, items, and sharded references)
-  categories: Partial<Record<SyncCategory, CategoryInfo | ShardedCategoryRef>>;
+  // Per-category tracking (supports blob and tree-indexed)
+  categories: Partial<Record<SyncCategory, ExtendedCategoryInfo>>;
 
   // Advisory lock (soft lock, not enforced)
   advisoryLock?: AdvisoryLock;
@@ -165,11 +172,14 @@ export interface Manifest {
   recentSyncs: SyncHistoryEntry[];
 }
 
+/** Current schema version for new manifests */
+export const CURRENT_SCHEMA_VERSION = '4.0' as const;
+
 export function createEmptyManifest(machineId: string): Manifest {
   const now = new Date().toISOString();
   return {
     version: 0,
-    schemaVersion: '3.0',
+    schemaVersion: CURRENT_SCHEMA_VERSION,
     createdAt: now,
     updatedAt: now,
     lastUpdatedBy: machineId,

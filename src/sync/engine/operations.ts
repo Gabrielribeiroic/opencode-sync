@@ -24,9 +24,7 @@ import {
   toStorageFiles,
   buildCryptoOptions,
   extractTombstoneIds,
-  fetchResolvedShards,
 } from './helpers.js';
-import { fetchRemoteItemsNotLocal } from './remote-fetch.js';
 
 export interface OperationContext {
   backend: StorageBackend;
@@ -45,11 +43,8 @@ export async function executePushOperation(
   ctx: PushContext,
   data: CategoryData[],
   remote?: Manifest
-): Promise<{ result: SyncResult; newState: LocalSyncState; remoteItems?: CategoryData[] }> {
+): Promise<{ result: SyncResult; newState: LocalSyncState }> {
   const existing = (await ctx.backend.listFiles()).map((f) => f.filename);
-
-  // Pre-fetch shards for sharded categories to enable proper merging
-  const resolvedShards = await fetchResolvedShards(ctx.backend, remote);
 
   const opts = {
     localData: data,
@@ -58,7 +53,7 @@ export async function executePushOperation(
     passphrase: buildCryptoOptions(ctx.passphrase, ctx.oldPassphrase),
     existingFiles: existing,
   };
-  const { files, manifest, changedCategories } = executePush(opts, remote, resolvedShards);
+  const { files, manifest, changedCategories } = executePush(opts, remote);
   const fileCount = Object.keys(files).length;
   syncLog(`[SYNC] Push: ${String(fileCount)} files, ${String(existing.length)} existing`);
   await ctx.backend.updateFiles(
@@ -66,20 +61,7 @@ export async function executePushOperation(
   );
   const newState = buildLocalState(manifest, data, ctx.getStorageId(), ctx.config.machineId);
 
-  // Fetch remote items we don't have locally (for writing to disk)
-  const remoteItems = resolvedShards
-    ? await fetchRemoteItemsNotLocal(ctx.backend, resolvedShards, data)
-    : undefined;
-
-  const result = buildPushResult({
-    changedCategories,
-    pulledData: remoteItems && remoteItems.length > 0 ? remoteItems : undefined,
-  });
-
-  // Only include remoteItems in return if there are any
-  if (remoteItems && remoteItems.length > 0) {
-    return { result, newState, remoteItems };
-  }
+  const result = buildPushResult({ changedCategories });
   return { result, newState };
 }
 

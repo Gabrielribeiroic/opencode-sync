@@ -1,4 +1,5 @@
 /** Push Operation - Pushes local data to remote storage. */
+
 import { packCategory, calculateChecksum } from '../packer.js';
 import { packItem, buildItemInfo, diffItems } from '../item-packer.js';
 import {
@@ -9,14 +10,21 @@ import {
   markOrphanedFiles,
   buildPushContext,
 } from './helpers.js';
-import { writeShardedCategory } from './sharding.js';
 import {
   type ItemCategoryInfo,
   type ItemInfo,
-  type CategoryInfo,
-  type ShardedCategoryRef,
+  type TreeIndexedCategoryInfo,
+  type ExtendedCategoryInfo,
+  TOMBSTONES_FILENAME,
 } from '../../types/index.js';
 import type { Tombstone } from '../../types/manifest.js';
+import {
+  parseTombstonesFile,
+  serializeTombstonesFile,
+  getCategoryTombstones,
+  setCategoryTombstones,
+  mergeTombstones,
+} from '../tombstone.js';
 import type {
   CategoryData,
   ItemCategoryData,
@@ -24,14 +32,13 @@ import type {
   Manifest,
   SyncCategory,
   PreparePushOptions,
-  ResolvedShard,
 } from './types.js';
 import { isBlobCategoryData, isItemCategoryData } from './types.js';
 
-/** Manifest category entry type (includes sharded refs) */
-type ManifestCategoryEntry = CategoryInfo | ShardedCategoryRef;
+/** Manifest category entry type (includes all category types) */
+type ManifestCategoryEntry = ExtendedCategoryInfo;
 
-/** Local type guard for item category info (excludes sharded refs) */
+/** Local type guard for item category info (excludes tree-indexed refs) */
 function isItemCatInfo(info: ManifestCategoryEntry): info is ItemCategoryInfo {
   return info.type === 'items';
 }
@@ -45,22 +52,14 @@ export interface PreparePushResult {
 
 /** Prepare all data for pushing to remote. */
 export function preparePushData(opts: PreparePushOptions): PreparePushResult {
-  const {
-    localData,
-    config,
-    localState,
-    passphrase,
-    existingFiles,
-    remoteManifest,
-    resolvedShards,
-  } = opts;
+  const { localData, config, localState, passphrase, existingFiles, remoteManifest } = opts;
   const ctx = buildPushContext(config, localState, passphrase);
   const newFiles = new Set<string>();
   const changedCategories: SyncCategory[] = [];
 
   for (const catData of localData) {
     if (!config.sync[catData.category]) continue;
-    const filenames = packCategoryData(catData, remoteManifest, ctx, resolvedShards);
+    const filenames = packCategoryData(catData, remoteManifest, ctx);
     for (const f of filenames) newFiles.add(f);
     changedCategories.push(catData.category);
   }
@@ -73,14 +72,8 @@ export function preparePushData(opts: PreparePushOptions): PreparePushResult {
 /** Extract remote item category data if available */
 function getRemoteItemData(
   remoteManifest: Manifest | undefined,
-  category: SyncCategory,
-  resolvedShards?: Record<SyncCategory, ResolvedShard>
+  category: SyncCategory
 ): { items: Record<string, ItemInfo>; tombstones: Record<string, Tombstone> } {
-  // First check if we have pre-resolved shard data
-  if (resolvedShards?.[category]) {
-    return resolvedShards[category];
-  }
-
   const info = remoteManifest?.categories[category];
   if (info?.type === 'items') {
     return { items: info.items, tombstones: info.tombstones };
@@ -92,15 +85,10 @@ function getRemoteItemData(
 function packCategoryData(
   catData: CategoryData,
   remoteManifest: Manifest | undefined,
-  ctx: PushContext,
-  resolvedShards?: Record<SyncCategory, ResolvedShard>
+  ctx: PushContext
 ): string[] {
   if (isItemCategoryData(catData)) {
-    const { items, tombstones } = getRemoteItemData(
-      remoteManifest,
-      catData.category,
-      resolvedShards
-    );
+    const { items, tombstones } = getRemoteItemData(remoteManifest, catData.category);
     return packItemCategoryData(catData, items, ctx, tombstones);
   }
   if (isBlobCategoryData(catData)) {
@@ -171,7 +159,7 @@ function processItemsForUpload(
 
 /**
  * Pack per-item category data (sessions, messages).
- * Only uploads items that have changed. Uses sharding when item count exceeds threshold.
+ * Uses tree-indexed approach: items stored as individual files, tombstones in separate file.
  */
 function packItemCategoryData(
   catData: ItemCategoryData,
@@ -189,17 +177,51 @@ function packItemCategoryData(
   }
   const newItems = removeItemsById(processed, tombResult.itemsToRemove);
 
-  // Always use sharding for item categories
-  const shardFile = writeShardedCategory(category, newItems, tombResult.tombstones, ctx);
+  // Write tree-indexed category reference to manifest (no per-item metadata in manifest)
+  writeTreeIndexedCategory(category, newItems, tombResult.tombstones, ctx);
 
-  // Return both item filenames AND the shard file to prevent orphan deletion
-  return [...filenames, shardFile];
+  // Return item filenames (Tree API will discover these)
+  return filenames;
+}
+
+/**
+ * Write a tree-indexed category to manifest and update tombstones file.
+ * Tree-indexed categories don't track per-item metadata in manifest.
+ */
+function writeTreeIndexedCategory(
+  category: SyncCategory,
+  items: Record<string, ItemInfo>,
+  tombstones: Record<string, Tombstone>,
+  ctx: PushContext
+): void {
+  // Get path prefix for the category
+  const pathPrefix = `${category}/`;
+
+  // Write tree-indexed reference to manifest
+  ctx.manifest.categories[category] = {
+    type: 'tree-indexed',
+    pathPrefix,
+    itemCount: Object.keys(items).length,
+    lastModified: ctx.now,
+    lastModifiedBy: ctx.machineId,
+  } satisfies TreeIndexedCategoryInfo;
+
+  // Merge tombstones into the tombstones file
+  if (Object.keys(tombstones).length > 0) {
+    const existingContent = ctx.tombstonesFileContent ?? null;
+    const existingFile = parseTombstonesFile(existingContent);
+    const categoryTombstones = getCategoryTombstones(existingFile, category);
+    const mergedTombstones = mergeTombstones(categoryTombstones, tombstones);
+    const updatedFile = setCategoryTombstones(existingFile, category, mergedTombstones);
+    ctx.tombstonesFileContent = serializeTombstonesFile(updatedFile);
+    ctx.files[TOMBSTONES_FILENAME] = { content: ctx.tombstonesFileContent };
+  }
 }
 
 /**
  * Check if local data needs pushing by comparing checksums.
- * For sharded categories (sessions, messages), we skip checksum comparison
- * since we don't have the shard content loaded. These rely on vector clock comparison.
+ * For tree-indexed categories, we skip detailed comparison
+ * since we rely on timestamp comparison for sync direction.
  */
 export function needsPush(localData: CategoryData[], remoteManifest: Manifest | null): boolean {
   if (!remoteManifest) return true;
@@ -208,10 +230,10 @@ export function needsPush(localData: CategoryData[], remoteManifest: Manifest | 
     const remoteInfo = remoteManifest.categories[catData.category];
 
     if (isItemCategoryData(catData)) {
-      // Per-item comparison - but only if remote is also items type (not sharded)
+      // Per-item comparison - but only if remote is also items type
       if (!remoteInfo) return true;
-      // Skip comparison for sharded categories - they use vector clock comparison
-      if (remoteInfo.type === 'sharded') continue;
+      // Skip comparison for tree-indexed - they use timestamp comparison
+      if (remoteInfo.type === 'tree-indexed') continue;
       if (!isItemCatInfo(remoteInfo)) return true;
       const diff = diffItems(catData.checksums, remoteInfo.items);
       if (diff.toUpload.length > 0) return true;

@@ -45,5 +45,13 @@ export {
   isItemTombstoned,
   getItemsToDelete,
   detectLocalDeletions,
+  // TombstonesFile handling (schema 4.0)
+  parseTombstonesFile,
+  serializeTombstonesFile,
+  getCategoryTombstones,
+  setCategoryTombstones,
+  addTombstone,
+  mergeTombstonesFiles,
+  filterExpiredTombstonesFile,
 } from './tombstone.js';
 export type { FilterTombstonesResult } from './tombstone.js';
