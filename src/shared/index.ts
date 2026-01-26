@@ -8,7 +8,12 @@ export { calculateChecksum, uint8ArrayToBase64, base64ToUint8Array } from './enc
 
 export { getErrorMessage, getErrorStack, toError, isError } from './error-utils.js';
 
-export { writePulledData, persistLocalState, processSyncResult } from './sync-result-handler.js';
+export {
+  writePulledData,
+  persistLocalState,
+  processSyncResult,
+  type StateProvider,
+} from './sync-result-handler.js';
 
 export {
   AppError,

@@ -53,9 +53,14 @@ async function handleSyncSuccess(
   client: LogClient,
   result: SyncResult
 ): Promise<void> {
+  const state = getPluginState();
+
   // Write pulled data and persist state using shared utilities
   await writePulledData(pathConfig, result);
-  await persistLocalState(pathConfig);
+  const newState = await persistLocalState(pathConfig, state.engine);
+  if (newState) {
+    state.localState = newState;
+  }
 
   await client.app.log({
     body: {

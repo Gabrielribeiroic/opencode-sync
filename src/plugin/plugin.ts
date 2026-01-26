@@ -139,7 +139,10 @@ function performInitialSync(pathConfig: PathConfig): void {
 
       if (result.success && result.action !== 'error') {
         await writePulledData(pathConfig, result);
-        await persistLocalState(pathConfig);
+        const newState = await persistLocalState(pathConfig, engine);
+        if (newState) {
+          getPluginState().localState = newState;
+        }
         log(`Initial sync complete in ${String(dur)}ms: ${result.message}`);
       } else {
         log(`Sync completed in ${String(dur)}ms: ${result.message}`);

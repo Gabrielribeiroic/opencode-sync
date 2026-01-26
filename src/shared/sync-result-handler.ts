@@ -6,11 +6,15 @@
  */
 
 import type { PathConfig } from '../types/paths.js';
-import type { SyncResult } from '../types/sync.js';
+import type { SyncResult, LocalSyncState } from '../types/sync.js';
 import type { CategoryData } from '../sync/operations/types.js';
 import { writeLocalData, deleteTombstonedItems, saveLocalState } from '../data/index.js';
 import { syncLog } from '../logging/index.js';
-import { getPluginState } from '../plugin/state-manager.js';
+
+/** Interface for engine that can provide local state */
+export interface StateProvider {
+  getLocalState(): LocalSyncState | null;
+}
 
 /** Actions that should trigger writing pulled data to disk */
 const WRITE_ACTIONS = new Set(['pulled', 'merged', 'pushed']);
@@ -43,22 +47,28 @@ export async function writePulledData(pathConfig: PathConfig, result: SyncResult
 
 /**
  * Persist engine's local state to disk after successful sync.
- * Updates both the state file and the in-memory plugin state.
+ * Returns the new state for the caller to update their in-memory state.
  */
-export async function persistLocalState(pathConfig: PathConfig): Promise<void> {
-  const state = getPluginState();
-  const newState = state.engine?.getLocalState();
+export async function persistLocalState(
+  pathConfig: PathConfig,
+  engine: StateProvider | null | undefined
+): Promise<LocalSyncState | null> {
+  const newState = engine?.getLocalState() ?? null;
   if (newState) {
     await saveLocalState(pathConfig, newState);
-    state.localState = newState;
   }
+  return newState;
 }
 
 /**
  * Process a successful sync result - write data and persist state.
  * Combines writePulledData and persistLocalState into a single call.
  */
-export async function processSyncResult(pathConfig: PathConfig, result: SyncResult): Promise<void> {
+export async function processSyncResult(
+  pathConfig: PathConfig,
+  result: SyncResult,
+  engine: StateProvider | null | undefined
+): Promise<LocalSyncState | null> {
   await writePulledData(pathConfig, result);
-  await persistLocalState(pathConfig);
+  return persistLocalState(pathConfig, engine);
 }

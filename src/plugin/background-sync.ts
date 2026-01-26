@@ -12,6 +12,15 @@ import { getPluginState } from './state-manager.js';
 import { isContinuousSyncReady } from './validation.js';
 import { getErrorMessage, writePulledData, persistLocalState } from '../shared/index.js';
 
+/** Helper to persist state and update in-memory state */
+async function persistAndUpdateState(pathConfig: PathConfig): Promise<void> {
+  const state = getPluginState();
+  const newState = await persistLocalState(pathConfig, state.engine);
+  if (newState) {
+    state.localState = newState;
+  }
+}
+
 /** Active file watcher instance */
 let activeWatcher: FileWatcher | null = null;
 
@@ -46,7 +55,7 @@ export function startFileWatcher(pathConfig: PathConfig): void {
           const { categories } = await loadLocalData(pathConfig, config.sync);
           const result = await engine.sync(categories);
           if (result.success) {
-            await persistLocalState(pathConfig);
+            await persistAndUpdateState(pathConfig);
           }
         } catch (error) {
           log(`WARNING: File watcher sync failed: ${getErrorMessage(error)}`);
@@ -79,7 +88,7 @@ export function startIntervalSync(pathConfig: PathConfig): void {
         const result = await engine.sync(categories);
         if (result.success) {
           await writePulledData(pathConfig, result);
-          await persistLocalState(pathConfig);
+          await persistAndUpdateState(pathConfig);
         }
         logIntervalResult(result);
       } catch (error) {

@@ -126,23 +126,6 @@ export function detectLocalDeletions(
   return deletions;
 }
 
-/**
- * Remove items from category info that have tombstones.
- * This ensures tombstoned items aren't included in the live items.
- */
-export function removeItemsWithTombstones(
-  items: Record<string, unknown>,
-  tombstones: Record<string, Tombstone>
-): Record<string, unknown> {
-  const result: Record<string, unknown> = {};
-  for (const [itemId, item] of Object.entries(items)) {
-    if (!(itemId in tombstones)) {
-      result[itemId] = item;
-    }
-  }
-  return result;
-}
-
 // Re-export TombstonesFile functions for backward compatibility
 export {
   parseTombstonesFile,
